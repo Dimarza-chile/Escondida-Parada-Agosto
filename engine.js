@@ -1800,6 +1800,27 @@ function polinRowHtml(p, otNum, mostrarEstacion) {
     </div>`;
 }
 
+// Cuando un polin viene con cantidad > 1 y sin posicion especifica (izquierdo/central/derecho),
+// significa que se van a cambiar varios polines de esa estacion sin saber todavia cual es cual.
+// En vez de una sola fila con "x2/x3" que esconde que son cambios independientes, se separa en
+// N filas individuales (mismo N° de estacion) para que cada una se marque, comente y fotografie
+// por separado — y como comparten estacion, el agrupador de renderPolinesList las junta solas
+// bajo un mini-encabezado "Estación N — X cambios".
+function expandirPolinesConCantidad(items) {
+  const resultado = [];
+  items.forEach((p) => {
+    const cant = parseInt(p.cantidad, 10) || 1;
+    if (cant > 1 && !p.posicion) {
+      for (let i = 1; i <= cant; i++) {
+        resultado.push({ ...p, id: `${p.id}::sub${i}`, cantidad: 1, idOriginal: p.id });
+      }
+    } else {
+      resultado.push(p);
+    }
+  });
+  return resultado;
+}
+
 function renderPolinesList() {
   const otNum = polinesSheetOtNum;
   const wrap = document.getElementById('polinesListWrap');
@@ -1941,7 +1962,7 @@ function posicionDe(desc) {
 function todosLosPolinesDeOt(otNum) {
   const base = (SEED_DATA.polinesPorOt && SEED_DATA.polinesPorOt[otNum]) || [];
   const emerg = (state.polinesEmergentes || []).filter((p) => String(p.otNum) === String(otNum));
-  return base.concat(emerg);
+  return expandirPolinesConCantidad(base.concat(emerg));
 }
 
 async function generatePolinesReportPdf(otNumOrList) {
