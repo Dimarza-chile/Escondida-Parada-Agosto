@@ -4,6 +4,11 @@
 const SEED_DATA = {
   "paradaNombre": "SHUTDOWN SLS22601 - MEC1",
   "paradaSubtitulo": "Agosto 2026",
+  // Correas donde los polines de Impacto vienen armados como "cama de impacto" (bandeja/trough
+  // con varios rodillos en V, una sola pieza) en vez de rodillos sueltos Izq/Central/Der.
+  // Ej: en CV201 son cama de impacto; en CV202 son polines de Impacto sueltos como los de Carga,
+  // solo que con estaciones mas apegadas entre si.
+  "correasConCamaImpacto": ["CV201"],
   "turnos": [
     "2026-08-05T07:00:00",
     "2026-08-05T19:00:00",

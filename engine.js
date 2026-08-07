@@ -1660,15 +1660,17 @@ function ensurePolinesModal() {
   // + la opcion de cama de impacto que agrupa toda la estacion) o de Retorno (izq/der).
   function actualizarOpcionesPosicion() {
     const ubic = document.getElementById('polinEmergUbicacion').value;
+    const correa = document.getElementById('polinEmergCorrea').value.trim();
+    const tipo = document.getElementById('polinEmergTipo').value.trim();
     const sel = document.getElementById('polinEmergPosicion');
     const valorPrevio = sel.value;
-    const opciones = ubic === 'Retorno'
-      ? ['', 'Izquierdo', 'Derecho']
-      : ['', 'Izquierdo', 'Central', 'Derecho', 'Cama de impacto (agrupa la estación)'];
+    const opciones = opcionesPosicionPolin(ubic, correa, tipo);
     sel.innerHTML = opciones.map((o) => `<option value="${o}">${o || '— Sin especificar —'}</option>`).join('');
     if (opciones.includes(valorPrevio)) sel.value = valorPrevio;
   }
   document.getElementById('polinEmergUbicacion').addEventListener('change', actualizarOpcionesPosicion);
+  document.getElementById('polinEmergCorrea').addEventListener('input', actualizarOpcionesPosicion);
+  document.getElementById('polinEmergTipo').addEventListener('input', actualizarOpcionesPosicion);
 
   document.getElementById('btnAddPolinEmergente').addEventListener('click', () => {
     if (!polinesSheetOtNum) return;
@@ -1780,6 +1782,20 @@ function closePolinesSheet() {
 
 // Genera el HTML de una fila de polin. mostrarEstacion=false se usa cuando varias filas
 // comparten el mismo N° de estacion y ya hay un mini-encabezado agrupandolas arriba.
+// Opciones de "Posicion" para un polin, segun ubicacion (Carga/Retorno), la correa y si es
+// de tipo Impacto. Reglas confirmadas por Bradson:
+// - Retorno: Izquierdo, Derecho, o un unico polin (sin lado) cuando la estacion trae solo uno.
+// - Carga (o Impacto en correas SIN cama de impacto, ej. CV202): Izquierdo/Central/Derecho.
+// - Impacto en correas CON cama de impacto (ej. CV201): las mismas 3 posiciones, mas la opcion
+//   de "Cama de impacto" cuando se cambia la bandeja completa como una sola pieza.
+function opcionesPosicionPolin(ubicacion, correa, tipoEstacion) {
+  if (ubicacion === 'Retorno') return ['', 'Izquierdo', 'Derecho', 'Único (1 polín, sin lado)'];
+  const esImpacto = /impacto/i.test(tipoEstacion || '');
+  const usaCamaImpacto = esImpacto && ((SEED_DATA.correasConCamaImpacto || []).includes(correa));
+  const base = ['', 'Izquierdo', 'Central', 'Derecho'];
+  return usaCamaImpacto ? base.concat('Cama de impacto (agrupa la estación)') : base;
+}
+
 function polinRowHtml(p, otNum, mostrarEstacion) {
   const e = state.polinesEstado[polinKey(otNum, p.id)];
   const cambiado = e && e.estado === 'Cambiado';
@@ -1794,9 +1810,7 @@ function polinRowHtml(p, otNum, mostrarEstacion) {
   // La posicion se puede fijar de entrada (polin emergente) o editar despues aqui mismo
   // (polines del listado original / filas separadas por cantidad, que no traen posicion).
   const posicionActual = (e && e.posicionManual) || p.posicion || '';
-  const opcionesPos = p.ubicacion === 'Retorno'
-    ? ['', 'Izquierdo', 'Derecho']
-    : ['', 'Izquierdo', 'Central', 'Derecho', 'Cama de impacto (agrupa la estación)'];
+  const opcionesPos = opcionesPosicionPolin(p.ubicacion, p.correa, p.tipoEstacion);
   const selectorPosicion = `<select class="polin-posicion-select" data-possel="${p.id}">${opcionesPos.map((o) =>
     `<option value="${o}" ${o === posicionActual ? 'selected' : ''}>${o || '— Posición —'}</option>`).join('')}</select>`;
   const posTag = posicionActual ? `<span class="polin-posicion-tag">${posicionActual}</span> ` : '';
