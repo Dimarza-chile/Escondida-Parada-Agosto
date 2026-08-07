@@ -324,6 +324,22 @@ function computeCurve() {
   const hhCanceladas = canceladas.reduce((s, o) => s + o.pesoPlanHH, 0);
   const netoHH = hhEmergentes - hhCanceladas;
 
+  // El avance real de una parada NUNCA deberia bajar de un turno al siguiente — es la misma
+  // idea de carryForward pero aplicada a la curva ya calculada, como red de seguridad final.
+  // Si algun calculo intermedio (ej. una OT que no es turno-aware, como los polines) produce
+  // un bajon puntual, esto lo aplana para que la curva mostrada sea siempre no-decreciente.
+  function forzarNoDecreciente(arr) {
+    let maxHasta = 0;
+    for (let i = 0; i < arr.length; i++) {
+      if (arr[i] === null || arr[i] === undefined) continue;
+      maxHasta = Math.max(maxHasta, arr[i]);
+      arr[i] = maxHasta;
+    }
+    return arr;
+  }
+  forzarNoDecreciente(percentReal);
+  forzarNoDecreciente(percentRealTotal);
+
   // Conteo de actividades por estado de avance (solo vigentes, no canceladas)
   const vigentes = allOts().filter((o) => !getOtEstado(o.otNum).startsWith('Cancelada'));
   const lastIdxForCount = N - 1;
@@ -3435,26 +3451,7 @@ function dibujarFilaOtLineaTiempo(doc, ot, o) {
   doc.text(`${fmtDateHour(ot.inicio)} → ${fmtDateHour(ot.fin)}`, marginX, cy);
   doc.setTextColor(0, 0, 0);
   badgeMini(pageW - marginX, cy, `De acuerdo a Gantt: ${Math.round(expected * 100)}%`, C_BANDA, [12, 68, 124]);
-  cy += 4;
-
-  // Franja de Turno A / Turno B, solo en el tramo de esta OT
-  const bandaY = cy, bandaH = 3;
-  for (let i = 0; i < boundaries.length - 1; i++) {
-    const s = boundaries[i], e = boundaries[i + 1];
-    if (e < ini || s > fin) continue;
-    const cs = s < ini ? ini : s, ce = e > fin ? fin : e;
-    const x0 = px(cs), x1 = px(ce);
-    const esDia = s.getHours() === 7;
-    doc.setFillColor(...(esDia ? C_BANDA : C_BANDB));
-    doc.rect(x0, bandaY, Math.max(x1 - x0, 0.2), bandaH, 'F');
-    if (x1 - x0 > 7) {
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(3.6);
-      doc.setTextColor(...(esDia ? [12, 68, 124] : [130, 130, 124]));
-      doc.text(esDia ? 'Turno A' : 'Turno B', (x0 + x1) / 2, bandaY + 2, { align: 'center' });
-    }
-  }
-  doc.setTextColor(0, 0, 0);
-  cy += bandaH + 2.4;
+  cy += 6.5;
 
   // Barra de un solo color para toda la OT — mas alta que antes para que quepan los % adentro
   const barY = cy, barH = 6;
@@ -3463,7 +3460,24 @@ function dibujarFilaOtLineaTiempo(doc, ot, o) {
   doc.setFillColor(...colorOt);
   doc.roundedRect(xIni, barY, Math.max(xFin - xIni, 0.8), barH, 0.6, 0.6, 'F');
 
+  // Lineas ROJAS de cambio de turno (7am/7pm) — se dibujan ANTES que los textos de % para que
+  // el numero quede siempre legible ENCIMA de la linea, nunca tapado por ella (antes la linea
+  // se dibujaba al final y quedaba pisando el porcentaje). Ya no se repite la franja/etiqueta
+  // "Turno A"/"Turno B" en cada fila — eso vive una sola vez arriba, en el eje compartido.
+  boundaries.forEach((b) => {
+    if (b <= ini || b >= fin) return;
+    const xb = px(b);
+    doc.setDrawColor(224, 65, 62); doc.setLineWidth(0.5);
+    doc.setLineDashPattern([0.8, 0.6], 0);
+    doc.line(xb, barY - 1.6, xb, barY + barH);
+    doc.setLineDashPattern([], 0);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(3.3); doc.setTextColor(224, 65, 62);
+    doc.text(fmtDateHour(b).split(' ')[0], xb, barY - 2, { align: 'center' });
+    doc.setTextColor(0, 0, 0);
+  });
+
   // Segmentos por subactividad: divisor blanco + hora de esa division + % de ESA subactividad
+  // (se dibujan DESPUES de las lineas rojas, para quedar siempre por encima y legibles)
   const segmentos = subs.map((s) => {
     const sIni = new Date(s.inicio) < ini ? ini : new Date(s.inicio);
     const sFin = new Date(s.fin) > fin ? fin : new Date(s.fin);
@@ -3485,24 +3499,20 @@ function dibujarFilaOtLineaTiempo(doc, ot, o) {
     doc.setFont('helvetica', 'bold'); doc.setFontSize(5.2);
     let tw = doc.getTextWidth(texto);
     if (tw + 2 > anchoSeg) { doc.setFontSize(3.4); tw = doc.getTextWidth(texto); }
+    // Chip de fondo detras del numero, para que se lea bien pase lo que pase debajo
+    // (una linea roja de cambio de turno, un divisor blanco, etc.)
+    try {
+      if (doc.GState && doc.setGState) {
+        doc.setFillColor(0, 0, 0); doc.setGState(new doc.GState({ opacity: 0.18 }));
+        doc.roundedRect((seg.x0 + seg.x1) / 2 - tw / 2 - 1, barY + barH / 2 - 2.1, tw + 2, 4.2, 0.8, 0.8, 'F');
+        doc.setGState(new doc.GState({ opacity: 1 }));
+      }
+    } catch (e) { /* si el plugin de opacidad no esta disponible, se omite el chip sin romper el resto */ }
     doc.setTextColor(255, 255, 255);
     doc.text(texto, (seg.x0 + seg.x1) / 2, barY + barH / 2 + 1.2, { align: 'center' });
     doc.setTextColor(0, 0, 0);
   });
   if (!segmentos.length) dibujarPctEnBarra(doc, xIni, xFin, barY, barH, real);
-
-  // Lineas ROJAS de cambio de turno (7am/7pm), cruzando la franja Y la barra, con su hora
-  boundaries.forEach((b) => {
-    if (b <= ini || b >= fin) return;
-    const xb = px(b);
-    doc.setDrawColor(224, 65, 62); doc.setLineWidth(0.5);
-    doc.setLineDashPattern([0.8, 0.6], 0);
-    doc.line(xb, bandaY, xb, barY + barH);
-    doc.setLineDashPattern([], 0);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(3.6); doc.setTextColor(224, 65, 62);
-    doc.text(fmtDateHour(b).split(' ')[0], xb, bandaY - 0.7, { align: 'center' });
-    doc.setTextColor(0, 0, 0);
-  });
 
   if (now >= ini && now <= fin) {
     const xNow = px(now);
@@ -3701,6 +3711,64 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
     cols.forEach((c, i) => { cell(x, cy, c.w, rowH, vals[i], { size: 7 }); x += c.w; });
     cy += rowH;
   });
+  cy += 6;
+
+  // ---- Cumplimiento mecanico por area: tabla OT/Descripcion/%Ejecucion + barra de
+  //      cumplimiento, una seccion por cada area (CORREA 201, CORREA 202, FEEDER 207, etc.) ----
+  ensureSpace(14);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(11.5); doc.setTextColor(...C_DARK);
+  doc.text('Cumplimiento mecánico por área', marginX, cy); cy += 8;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(0, 0, 0);
+  const areasOrdenadas = [...new Set(ots.map((o) => o.area))].sort();
+  areasOrdenadas.forEach((area) => {
+    const otsArea = ots.filter((o) => o.area === area);
+    if (!otsArea.length) return;
+    ensureSpace(14);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...brandRGB);
+    doc.text(area, marginX, cy); cy += 5;
+    doc.setTextColor(0, 0, 0);
+
+    const colsArea = [{ w: 22, label: 'OT' }, { w: 0, label: 'Descripción' }, { w: 28, label: '% Ejecución' }];
+    colsArea[1].w = (pageW - marginX * 2) - colsArea[0].w - colsArea[2].w;
+    function headerTablaArea() {
+      let x = marginX;
+      colsArea.forEach((c) => { cell(x, cy, c.w, 6, c.label, { bold: true, fill: [230, 230, 226], size: 6.5 }); x += c.w; });
+      cy += 6;
+    }
+    ensureSpace(8); headerTablaArea();
+    let nEjec = 0, nEmerg = 0, nNoEjec = 0;
+    otsArea.forEach((ot) => {
+      const rowH = 6;
+      if (cy + rowH > pageH - 16) { newPage(); headerTablaArea(); }
+      const pct = otProgressAt(ot, SEED_DATA.turnoLabels.length - 1);
+      const esEmerg = ot.tipo === 'Emergente';
+      let txtPct;
+      if (esEmerg) { txtPct = 'EMERGENTE'; nEmerg++; }
+      else {
+        txtPct = Math.round(pct * 100) + '%';
+        if (pct <= 0.001) nNoEjec++; else nEjec++;
+      }
+      let x = marginX;
+      const vals2 = [String(ot.otNum), ot.descripcion, txtPct];
+      colsArea.forEach((c, i) => { cell(x, cy, c.w, rowH, vals2[i], { size: 6.5, color: (esEmerg && i === 2) ? [180, 90, 20] : C_DARK }); x += c.w; });
+      cy += rowH;
+    });
+    cy += 3;
+
+    const totalArea = otsArea.length || 1;
+    ensureSpace(10);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(...C_MUTED);
+    doc.text(`Cumplimiento: ${nEjec}/${otsArea.length} ejecutadas (${Math.round(nEjec / totalArea * 100)}%) · ${nEmerg} emergentes · ${nNoEjec} no ejecutadas`, marginX, cy);
+    cy += 4;
+    const barW = pageW - marginX * 2, barH = 4;
+    let bx = marginX;
+    doc.setFillColor(237, 237, 234); doc.rect(marginX, cy, barW, barH, 'F');
+    if (nEjec) { const w = barW * nEjec / totalArea; doc.setFillColor(31, 169, 113); doc.rect(bx, cy, w, barH, 'F'); bx += w; }
+    if (nEmerg) { const w = barW * nEmerg / totalArea; doc.setFillColor(255, 179, 92); doc.rect(bx, cy, w, barH, 'F'); bx += w; }
+    if (nNoEjec) { const w = barW * nNoEjec / totalArea; doc.setFillColor(224, 65, 62); doc.rect(bx, cy, w, barH, 'F'); }
+    doc.setTextColor(0, 0, 0);
+    cy += barH + 8;
+  });
 
   drawFooter();
   const nombreArchivo = supervisorFiltro ? `Informe_Actividades_${parTxt.replace(/\s+/g,'_')}` : 'Informe_Actividades_General';
@@ -3770,7 +3838,18 @@ async function generateInformeTurnoPdf() {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const pageW = 210, pageH = 297, marginX = 14;
   let cy = 20, pageNum = 1;
+  const brandRGB = (window.BRANDING && window.BRANDING.colorRGB) || [255, 122, 30];
   const C_DARK = [26, 26, 46], C_MUTED = [107, 107, 117], C_LINE = [220, 220, 216];
+  function cell(x, y, w, h, txt, opts) {
+    opts = opts || {};
+    doc.setDrawColor(...C_LINE);
+    if (opts.fill) { doc.setFillColor(...opts.fill); doc.rect(x, y, w, h, 'FD'); } else doc.rect(x, y, w, h);
+    doc.setFont('helvetica', opts.bold ? 'bold' : 'normal'); doc.setFontSize(opts.size || 7);
+    doc.setTextColor(...(opts.color || C_DARK));
+    const lines = doc.splitTextToSize(String(txt == null ? '' : txt), w - 3);
+    doc.text(lines, x + 1.5, y + h / 2 - (lines.length - 1) * 1.2 + 1, { baseline: 'middle' });
+    doc.setTextColor(0, 0, 0);
+  }
 
   function drawFooter() {
     doc.setFontSize(7.5); doc.setTextColor(150, 150, 150);
@@ -3898,6 +3977,64 @@ async function generateInformeTurnoPdf() {
           return cyx + 3.2;
         },
       });
+    });
+  }
+
+  // ---- Cumplimiento mecanico por area (mismas OT que aparecen arriba, agrupadas) ----
+  if (ots.length > 0) {
+    ensureSpace(14);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11.5); doc.setTextColor(...C_DARK);
+    doc.text('Cumplimiento mecánico por área', marginX, cy); cy += 8;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(0, 0, 0);
+    const areasOrdenadas = [...new Set(ots.map((o) => o.area))].sort();
+    areasOrdenadas.forEach((area) => {
+      const otsArea = ots.filter((o) => o.area === area);
+      if (!otsArea.length) return;
+      ensureSpace(14);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...brandRGB);
+      doc.text(area, marginX, cy); cy += 5;
+      doc.setTextColor(0, 0, 0);
+
+      const colsArea = [{ w: 22, label: 'OT' }, { w: 0, label: 'Descripción' }, { w: 28, label: '% Ejecución' }];
+      colsArea[1].w = (pageW - marginX * 2) - colsArea[0].w - colsArea[2].w;
+      function headerTablaArea() {
+        let x = marginX;
+        colsArea.forEach((c) => { cell(x, cy, c.w, 6, c.label, { bold: true, fill: [230, 230, 226], size: 6.5 }); x += c.w; });
+        cy += 6;
+      }
+      ensureSpace(8); headerTablaArea();
+      let nEjec = 0, nEmerg = 0, nNoEjec = 0;
+      otsArea.forEach((ot) => {
+        const rowH = 6;
+        if (cy + rowH > pageH - 16) { newPage(); headerTablaArea(); }
+        const pct = otProgressAt(ot, SEED_DATA.turnoLabels.length - 1);
+        const esEmerg = ot.tipo === 'Emergente';
+        let txtPct;
+        if (esEmerg) { txtPct = 'EMERGENTE'; nEmerg++; }
+        else {
+          txtPct = Math.round(pct * 100) + '%';
+          if (pct <= 0.001) nNoEjec++; else nEjec++;
+        }
+        let x = marginX;
+        const vals2 = [String(ot.otNum), ot.descripcion, txtPct];
+        colsArea.forEach((c, i) => { cell(x, cy, c.w, rowH, vals2[i], { size: 6.5, color: (esEmerg && i === 2) ? [180, 90, 20] : C_DARK }); x += c.w; });
+        cy += rowH;
+      });
+      cy += 3;
+
+      const totalArea = otsArea.length || 1;
+      ensureSpace(10);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(...C_MUTED);
+      doc.text(`Cumplimiento: ${nEjec}/${otsArea.length} ejecutadas (${Math.round(nEjec / totalArea * 100)}%) · ${nEmerg} emergentes · ${nNoEjec} no ejecutadas`, marginX, cy);
+      cy += 4;
+      const barW = pageW - marginX * 2, barH = 4;
+      let bx = marginX;
+      doc.setFillColor(237, 237, 234); doc.rect(marginX, cy, barW, barH, 'F');
+      if (nEjec) { const w = barW * nEjec / totalArea; doc.setFillColor(31, 169, 113); doc.rect(bx, cy, w, barH, 'F'); bx += w; }
+      if (nEmerg) { const w = barW * nEmerg / totalArea; doc.setFillColor(255, 179, 92); doc.rect(bx, cy, w, barH, 'F'); bx += w; }
+      if (nNoEjec) { const w = barW * nNoEjec / totalArea; doc.setFillColor(224, 65, 62); doc.rect(bx, cy, w, barH, 'F'); }
+      doc.setTextColor(0, 0, 0);
+      cy += barH + 8;
     });
   }
 
