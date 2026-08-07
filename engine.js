@@ -3233,6 +3233,51 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ---- Informe de actividades (respeta filtro de supervisor) ----
+// ---- Helpers compartidos para dibujar la Linea de tiempo (los usan tanto el informe de
+//      actividades como el informe por turno, para que se vean exactamente igual). ----
+
+// Escribe el % REAL centrado DENTRO de la barra de color (blanco, negrita). Si la barra
+// es muy angosta para que quepa el texto, lo pone justo despues en vez de encimarlo.
+function dibujarPctEnBarra(doc, x0, x1, barY, barH, real) {
+  const texto = `${Math.round(real * 100)}%`;
+  const anchoBarra = x1 - x0;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(5.4);
+  let tw = doc.getTextWidth(texto);
+  if (tw + 2.5 > anchoBarra) { doc.setFontSize(4); tw = doc.getTextWidth(texto); }
+  if (tw + 2 <= anchoBarra) {
+    doc.setTextColor(255, 255, 255);
+    doc.text(texto, x0 + anchoBarra / 2, barY + barH / 2 + 1.1, { align: 'center' });
+  } else {
+    doc.setTextColor(70, 70, 70);
+    doc.text(texto, x1 + 1.2, barY + barH / 2 + 1.1);
+  }
+  doc.setTextColor(0, 0, 0);
+}
+
+// Escribe el nombre + % de avance de cada subactividad JUSTO DEBAJO de su propio tramo de
+// la barra (no como un solo texto largo corrido) — asi cada descripcion queda alineada con
+// su segmento real y no se monta encima de la del segmento vecino. Devuelve el nuevo cy.
+function dibujarSubactividadesPorSegmento(doc, subs, ini, fin, px, otNum, startY, C_MUTED) {
+  if (!subs.length) return startY;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(4.3); doc.setTextColor(...C_MUTED);
+  let maxLineas = 1;
+  const datos = subs.map((s) => {
+    const sIni = new Date(s.inicio) < ini ? ini : new Date(s.inicio);
+    const sFin = new Date(s.fin) > fin ? fin : new Date(s.fin);
+    const x0 = px(sIni), x1 = px(sFin);
+    const live = getSubLive(otNum, s.nombre);
+    const avanceSub = Math.round((carryForward(live.avance, SEED_DATA.turnoLabels.length - 1) || 0) * 100);
+    const w = Math.max(x1 - x0, 9);
+    let lineas = doc.splitTextToSize(`${s.nombre} · ${avanceSub}%`, w);
+    if (lineas.length > 2) { lineas = [lineas[0], lineas[1].slice(0, Math.max(lineas[1].length - 3, 3)) + '…']; }
+    maxLineas = Math.max(maxLineas, lineas.length);
+    return { x0, lineas };
+  });
+  datos.forEach((d) => doc.text(d.lineas, d.x0, startY + 2));
+  doc.setTextColor(0, 0, 0);
+  return startY + maxLineas * 2.2 + 2.4;
+}
+
 async function generateInformeActividadesPdf(supervisorFiltro) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
@@ -3336,7 +3381,7 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
       const ini = new Date(ot.inicio), fin = new Date(ot.fin);
       const subs = (ot.subactividades || []).slice().sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
       const emergs = (SEED_DATA.complementarias || []).filter((c) => c.otRelacionada === ot.otNum);
-      const alturaEstim = 10 + (subs.length ? 3 : 0) + (emergs.length ? 2.5 : 0);
+      const alturaEstim = 10 + (subs.length ? 6 : 0) + (emergs.length ? 2.5 : 0);
       if (cy + alturaEstim > pageH - 14) { newPage(); dibujarEjeCompartido(); }
 
       const real = otProgressAt(ot, SEED_DATA.turnoLabels.length - 1);
@@ -3352,10 +3397,7 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
       doc.setFont('helvetica', 'normal'); doc.setFontSize(5.2); doc.setTextColor(...C_MUTED);
       doc.text(`${fmtDateHour(ot.inicio)} → ${fmtDateHour(ot.fin)}`, marginX, cy);
       doc.setTextColor(0, 0, 0);
-      let bx = pageW - marginX;
-      bx -= badgeMini(bx, cy, `Real: ${Math.round(real * 100)}%`, real + 0.001 < expected ? [252, 235, 235] : [234, 243, 222], real + 0.001 < expected ? [121, 31, 31] : [39, 80, 10]);
-      bx -= 1.5;
-      bx -= badgeMini(bx, cy, `De acuerdo a Gantt: ${Math.round(expected * 100)}%`, C_BANDA, [12, 68, 124]);
+      badgeMini(pageW - marginX, cy, `De acuerdo a Gantt: ${Math.round(expected * 100)}%`, C_BANDA, [12, 68, 124]);
       cy += 2.4;
 
       // Track de fondo: todo el ancho representa la parada completa, tenue,
@@ -3375,6 +3417,7 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
         doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.6);
         doc.line(x, barY, x, barY + barH);
       });
+      dibujarPctEnBarra(doc, x0, x1, barY, barH, real);
       if (now >= ini && now <= fin) {
         const xNow = px(now);
         doc.setDrawColor(26, 26, 26); doc.setLineWidth(0.5);
@@ -3394,20 +3437,9 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
         cy += emH + 1;
       }
 
-      // Nombre + hora + % de avance de cada subactividad, debajo de la barra
-      if (subs.length) {
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(4.4); doc.setTextColor(...C_MUTED);
-        const txt = subs.map((s) => {
-          const live = getSubLive(ot.otNum, s.nombre);
-          const avanceSub = Math.round((carryForward(live.avance, SEED_DATA.turnoLabels.length - 1) || 0) * 100);
-          return `${s.nombre} (${fmtDateHour(s.inicio)}–${fmtDateHour(s.fin)}) · ${avanceSub}%`;
-        }).join('   ·   ');
-        const lineas = doc.splitTextToSize(txt, trackW);
-        doc.text(lineas, trackX, cy + 1.8);
-        cy += lineas.length * 2.3 + 1.4;
-        doc.setTextColor(0, 0, 0);
-      }
-      cy += 2.2;
+      // Nombre + % de avance de cada subactividad, cada uno debajo de su propio segmento
+      cy = dibujarSubactividadesPorSegmento(doc, subs, ini, fin, px, ot.otNum, cy, C_MUTED);
+      cy += 1.3;
       doc.setDrawColor(...C_LINE); doc.line(marginX, cy - 1.8, pageW - marginX, cy - 1.8);
     });
     cy += 4;
@@ -3631,7 +3663,7 @@ async function generateInformeTurnoPdf() {
       const ini = new Date(ot.inicio), fin = new Date(ot.fin);
       const subs = (ot.subactividades || []).slice().sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
       const emergs = (SEED_DATA.complementarias || []).filter((c) => c.otRelacionada === ot.otNum);
-      const alturaEstim = 13 + (subs.length ? 3 : 0) + (emergs.length ? 2.5 : 0);
+      const alturaEstim = 13 + (subs.length ? 6 : 0) + (emergs.length ? 2.5 : 0);
       if (cy + alturaEstim > pageH - 14) { newPage(); dibujarEjeCompartido(); }
 
       const real = otProgressAt(ot, SEED_DATA.turnoLabels.length - 1);
@@ -3664,10 +3696,7 @@ async function generateInformeTurnoPdf() {
       doc.setFont('helvetica', 'normal'); doc.setFontSize(5.2); doc.setTextColor(...C_MUTED);
       doc.text(`${fmtDateHour(ot.inicio)} → ${fmtDateHour(ot.fin)}`, marginX, cy);
       doc.setTextColor(0, 0, 0);
-      let bx = pageW - marginX;
-      bx -= badgeMini(bx, cy, `Real: ${Math.round(real * 100)}%`, real + 0.001 < expected ? [252, 235, 235] : [234, 243, 222], real + 0.001 < expected ? [121, 31, 31] : [39, 80, 10]);
-      bx -= 1.5;
-      bx -= badgeMini(bx, cy, `De acuerdo a Gantt: ${Math.round(expected * 100)}%`, C_BANDA, [12, 68, 124]);
+      badgeMini(pageW - marginX, cy, `De acuerdo a Gantt: ${Math.round(expected * 100)}%`, C_BANDA, [12, 68, 124]);
       cy += 2.4;
 
       const barY = cy, barH = 3.2;
@@ -3683,6 +3712,7 @@ async function generateInformeTurnoPdf() {
         doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.6);
         doc.line(x, barY, x, barY + barH);
       });
+      dibujarPctEnBarra(doc, x0, x1, barY, barH, real);
       if (now >= ini && now <= fin) {
         const xNow = px(now);
         doc.setDrawColor(26, 26, 26); doc.setLineWidth(0.5);
@@ -3701,19 +3731,8 @@ async function generateInformeTurnoPdf() {
         cy += emH + 1;
       }
 
-      if (subs.length) {
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(4.4); doc.setTextColor(...C_MUTED);
-        const txt = subs.map((s) => {
-          const live = getSubLive(ot.otNum, s.nombre);
-          const avanceSub = Math.round((carryForward(live.avance, SEED_DATA.turnoLabels.length - 1) || 0) * 100);
-          return `${s.nombre} (${fmtDateHour(s.inicio)}–${fmtDateHour(s.fin)}) · ${avanceSub}%`;
-        }).join('   ·   ');
-        const lineas = doc.splitTextToSize(txt, trackW);
-        doc.text(lineas, trackX, cy + 1.8);
-        cy += lineas.length * 2.3 + 1.4;
-        doc.setTextColor(0, 0, 0);
-      }
-      cy += 2.2;
+      cy = dibujarSubactividadesPorSegmento(doc, subs, ini, fin, px, ot.otNum, cy, C_MUTED);
+      cy += 1.3;
       doc.setDrawColor(...C_LINE); doc.line(marginX, cy - 1.8, pageW - marginX, cy - 1.8);
     });
   }

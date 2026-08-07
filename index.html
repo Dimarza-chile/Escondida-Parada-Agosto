@@ -138,11 +138,11 @@
        de una actividad. Por defecto (nada elegido) se ve la Linea de tiempo completa;
        en cuanto se elige una OT, esta se esconde y aparece el detalle en su lugar. */
     body:not(.en-inicio) #ganttCard{
-      display:block; grid-column:2; grid-row:1;
+      display:block !important; grid-column:2; grid-row:1;
       max-height:calc(100vh - 200px); overflow-y:auto;
     }
     body:not(.en-inicio):has(#sheetBackdrop.tiene-seleccion) #ganttCard,
-    body:not(.en-inicio):has(#polinesSheetBackdrop.open) #ganttCard{ display:none; }
+    body:not(.en-inicio):has(#polinesSheetBackdrop.open) #ganttCard{ display:none !important; }
     body:not(.en-inicio) #sheetBackdrop:not(.tiene-seleccion){ display:none; }
 
     /* El panel de detalle deja de ser un overlay flotante y pasa a ser una columna mas */
@@ -252,7 +252,20 @@
     /* Encabezado "CORREA CV201" etc. en la Linea de tiempo — mas grande y legible */
     .gantt-area-header{ font-size:14px; font-weight:700; letter-spacing:.02em; margin:14px 2px 6px; border-left-width:3px; padding-left:6px; }
     .wp-tag{ font-size:10.5px; padding:3px 7px; }
-    .turno-actual-badge{ font-size:11px; padding:8px 12px; border-radius:12px; line-height:1.5; }
+    /* El header (logo + WORK PACK + botones + turno) se comia como 2/3 de la pantalla,
+       dejando muy poco espacio real para la Linea de tiempo (que es lo que scrollea).
+       Se compacta agresivamente para que el contenido util tenga la mayor parte del alto. */
+    header.top{ padding:8px 14px 7px; }
+    .logos-row{ margin-bottom:5px; }
+    .logos-row img{ height:20px; }
+    .dmz-texto{ font-size:11px; }
+    .wp-linea{ margin-bottom:3px; gap:6px; }
+    .informes-row{ margin-top:6px; gap:6px; }
+    .btn-informe-sup{ padding:7px 9px; }
+    .btn-informe-arrow{ padding:7px 10px; }
+    .btn-informe{ padding:7px 9px; min-height:32px; }
+    .eyebrow{ font-size:9px; margin:0; }
+    .turno-actual-badge{ font-size:11px; padding:6px 11px; border-radius:12px; line-height:1.4; margin-top:6px; }
     .eyebrow{ font-size:11px; }
 
     /* El "chrome" de la tarjeta Linea de tiempo (titulo, leyenda de colores, eje de dias,
@@ -281,8 +294,8 @@
     .gantt-row-full .gantt-track{ height:13px; }
     .btn-add-emerg{ font-size:15px; padding:14px; min-height:50px; }
     .btn-informe{ font-size:12px; padding:9px 10px; min-height:40px; }
-    .wp-nom{ font-size:19px; }
-    .wp-rango{ font-size:13px; }
+    .wp-nom{ font-size:16px; }
+    .wp-rango{ font-size:11px; }
 
     nav.tabs{ display:none; }
     .view-toggle{ display:none; }
