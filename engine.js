@@ -1525,6 +1525,21 @@ async function savePolinComentario(otNum, polin, texto) {
   await guardarPolinCambio(otNum, polin, estadoActual, limpio);
 }
 
+// Guarda/edita la posicion (izquierdo/central/derecho) directamente sobre CUALQUIER polin,
+// tanto los que vienen del listado original (que no traen posicion) como los emergentes
+// o las filas separadas por cantidad>1. No pisa estado/comentario, solo agrega este campo.
+async function savePolinPosicion(otNum, polin, posicion) {
+  const key = polinKey(otNum, polin.id);
+  try {
+    await polinesEstadoCollection().doc(key).set({
+      posicionManual: posicion, otNum, polinId: polin.id,
+    }, { merge: true });
+  } catch (e) {
+    console.error(e);
+    showToast('No se pudo guardar la posición — revisa tu conexión');
+  }
+}
+
 async function savePolinFoto(otNum, polin, tipo, file) {
   const key = polinKey(otNum, polin.id);
   try {
@@ -1776,7 +1791,15 @@ function polinRowHtml(p, otNum, mostrarEstacion) {
   const critSymbols = { 1: '✕', 2: '❙', 3: '✓' };
   const critBadge = p.criticidad ? `<span class="crit-tag crit-${p.criticidad}">${critSymbols[p.criticidad]} ${critLabels[p.criticidad]}</span>` : '';
   const emergBadge = p.emergente ? `<span class="crit-tag" style="background:rgba(255,179,92,.2); color:var(--emergente);">EMERGENTE</span>` : '';
-  const posTag = p.posicion ? `<span class="polin-posicion-tag">${p.posicion}</span> ` : '';
+  // La posicion se puede fijar de entrada (polin emergente) o editar despues aqui mismo
+  // (polines del listado original / filas separadas por cantidad, que no traen posicion).
+  const posicionActual = (e && e.posicionManual) || p.posicion || '';
+  const opcionesPos = p.ubicacion === 'Retorno'
+    ? ['', 'Izquierdo', 'Derecho']
+    : ['', 'Izquierdo', 'Central', 'Derecho', 'Cama de impacto (agrupa la estación)'];
+  const selectorPosicion = `<select class="polin-posicion-select" data-possel="${p.id}">${opcionesPos.map((o) =>
+    `<option value="${o}" ${o === posicionActual ? 'selected' : ''}>${o || '— Posición —'}</option>`).join('')}</select>`;
+  const posTag = posicionActual ? `<span class="polin-posicion-tag">${posicionActual}</span> ` : '';
   const titulo = mostrarEstacion
     ? `Estación ${p.estacion || '—'} ${posTag}${p.tipoEstacion ? '· ' + p.tipoEstacion : ''}${p.cantidad ? ' · x' + p.cantidad : ''}`
     : `${posTag}${p.tipoEstacion ? p.tipoEstacion : 'Cambio'}${p.cantidad ? ' · x' + p.cantidad : ''}`;
@@ -1787,6 +1810,7 @@ function polinRowHtml(p, otNum, mostrarEstacion) {
         <div class="polin-titulo">${critBadge}${emergBadge}${titulo}</div>
         <div class="polin-desc">${p.descripcion || ''}</div>
         ${cambiado && e.turno ? `<div class="polin-meta">Cambiado en ${e.turno}${e.supervisor ? ' · ' + e.supervisor : ''}</div>` : ''}
+        <label class="polin-posicion-label" onclick="event.stopPropagation()">Posición: ${selectorPosicion}</label>
         <textarea class="polin-comentario" data-comentario="${p.id}" placeholder="Comentario: por qué se cambió o por qué no (opcional)">${comentario}</textarea>
         <div class="polin-fotos">
           <button type="button" class="polin-foto-btn ${tieneAntes ? 'tiene-foto' : ''}" data-fotobtn="${p.id}" data-fototipo="antes">📷 ${tieneAntes ? 'Antes ✓' : 'Antes'}</button>
@@ -1900,6 +1924,14 @@ function renderPolinesList() {
       const p = items.find((x) => String(x.id) === ta.dataset.comentario);
       if (!p) return;
       await savePolinComentario(otNum, p, e.target.value);
+    });
+  });
+  wrap.querySelectorAll('.polin-posicion-select').forEach((sel) => {
+    sel.addEventListener('click', (e) => e.stopPropagation());
+    sel.addEventListener('change', async (e) => {
+      const p = items.find((x) => String(x.id) === sel.dataset.possel);
+      if (!p) return;
+      await savePolinPosicion(otNum, p, e.target.value);
     });
   });
   wrap.querySelectorAll('.polin-foto-btn').forEach((btn) => {
