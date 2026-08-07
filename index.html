@@ -108,7 +108,8 @@
 
   /* ---------- Layout de 3 paneles en pantallas grandes (escritorio/tablet) ---------- */
   @media (min-width: 1024px){
-    .app{ max-width:1400px; margin:0 auto; }
+    .app{ width:100%; margin:0; padding:0 24px; }
+    #btnVolverTimeline, #btnVolverDetalleMovil{ display:none !important; }
 
     /* En la pantalla de inicio el hero ocupa todo: nada de grid de 3 paneles */
     body.en-inicio main{ display:block; padding:0 20px; }
