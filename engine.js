@@ -434,6 +434,7 @@ function renderList() {
 
       if (!hasSubs) {
         // Emergente simple: sin acordeón, toda la tarjeta abre el panel de % directo
+        const btnEliminarEmerg = isEmerg ? `<button type="button" class="btn-x-emergente" data-eliminaremerg="${ot.otNum}" title="Eliminar esta actividad emergente">✕</button>` : '';
         html += `
           <div class="${cardClass}" ${cardStyle} data-otcard="${ot.otNum}" data-direct="${ot.otNum}">
             <div class="ot-row1">
@@ -442,7 +443,10 @@ function renderList() {
                 <div class="ot-num">${ot.pesoPlanHH ? ot.pesoPlanHH.toFixed(1) + ' HH · ' : ''}avance directo</div>
                 ${supTag}
               </div>
-              ${badge}
+              <div style="display:flex; align-items:center; gap:6px;">
+                ${badge}
+                ${btnEliminarEmerg}
+              </div>
             </div>
             <div class="progress-row">
               <div class="progress-track"><div class="progress-fill" style="width:${Math.round(pct*100)}%; background:${barColor}"></div></div>
@@ -528,6 +532,19 @@ function renderList() {
       state.otSeleccionada = el.dataset.direct;
       openSheetDirect(el.dataset.direct);
       renderList();
+    });
+  });
+  wrap.querySelectorAll('[data-eliminaremerg]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('¿Estás seguro de eliminar esta actividad emergente? Se borrará también su avance registrado.')) return;
+      try {
+        await deleteManualEmergente(btn.dataset.eliminaremerg);
+        showToast('Emergente eliminada');
+      } catch (err) {
+        console.error(err);
+        showToast('No se pudo eliminar — revisa tu conexión');
+      }
     });
   });
   wrap.querySelectorAll('[data-polines]').forEach((el) => {
@@ -1532,6 +1549,13 @@ async function agregarPolinEmergente(otNum, datos) {
   await polinesEmergentesCollection().add(doc);
 }
 
+// Borra un polin emergente agregado por error. Tambien limpia su estado (checked/comentario/
+// posicion) si quedo alguno guardado, para no dejar basura huerfana en Firestore.
+async function eliminarPolinEmergente(otNum, polinId) {
+  await polinesEmergentesCollection().doc(polinId).delete();
+  try { await polinesEstadoCollection().doc(polinKey(otNum, polinId)).delete(); } catch (e) { /* puede no existir, no pasa nada */ }
+}
+
 function listenPolines() {
   polinesEstadoCollection().onSnapshot((snap) => {
     state.polinesEstado = {};
@@ -1901,7 +1925,8 @@ function polinRowHtml(p, otNum, mostrarEstacion) {
   const critLabels = { 1: 'Alta', 2: 'Media', 3: 'Baja' };
   const critSymbols = { 1: '✕', 2: '❙', 3: '✓' };
   const critBadge = p.criticidad ? `<span class="crit-tag crit-${p.criticidad}">${critSymbols[p.criticidad]} ${critLabels[p.criticidad]}</span>` : '';
-  const emergBadge = p.emergente ? `<span class="crit-tag" style="background:rgba(255,179,92,.2); color:var(--emergente);">EMERGENTE</span>` : '';
+  const emergBadge = p.emergente ? `<span class="crit-tag" style="background:rgba(255,179,92,.2); color:var(--emergente);">EMERGENTE</span>
+    <button type="button" class="btn-x-emergente" data-eliminarpolin="${p.idOriginal || p.id}" data-eliminarpolinot="${otNum}" title="Eliminar este polín emergente">✕</button>` : '';
   // La posicion se puede fijar de entrada (polin emergente) o editar despues aqui mismo
   // (polines del listado original / filas separadas por cantidad, que no traen posicion).
   const posicionActual = (e && e.posicionManual) || p.posicion || '';
@@ -1971,10 +1996,14 @@ function polinGrupoHtml(sub, otNum) {
     const posicionActual = (e && e.posicionManual) || p.posicion || '';
     const selector = `<select class="polin-posicion-select" data-possel="${p.id}">${opcionesPos.map((o) =>
       `<option value="${o}" ${o === posicionActual ? 'selected' : ''}>${o || '— Posición —'}</option>`).join('')}</select>`;
+    const btnX = p.emergente
+      ? `<button type="button" class="btn-x-emergente btn-x-emergente-mini" data-eliminarpolin="${p.idOriginal || p.id}" data-eliminarpolinot="${otNum}" title="Eliminar este polín emergente">✕</button>`
+      : '';
     return `
       <div class="polin-pos-fila" data-posfila="${p.id}">
         <div class="polin-check ${cambiado ? 'marcado' : ''}" data-checkpos="${p.id}">${cambiado ? '✓' : ''}</div>
         ${selector}
+        ${btnX}
       </div>`;
   }).join('');
 
@@ -2103,6 +2132,21 @@ function renderPolinesList() {
           posicion: '', cantidad: 1,
         });
       } catch (err) { console.error(err); showToast('No se pudo agregar la posición'); }
+    });
+  });
+  wrap.querySelectorAll('[data-eliminarpolin]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('¿Estás seguro de eliminar este polín emergente? Se borrará también su avance registrado.')) return;
+      btn.disabled = true;
+      try {
+        await eliminarPolinEmergente(btn.dataset.eliminarpolinot, btn.dataset.eliminarpolin);
+        showToast('Polín emergente eliminado');
+      } catch (err) {
+        console.error(err);
+        showToast('No se pudo eliminar — revisa tu conexión');
+        btn.disabled = false;
+      }
     });
   });
   wrap.querySelectorAll('.polin-comentario').forEach((ta) => {
@@ -3400,27 +3444,18 @@ document.addEventListener('DOMContentLoaded', () => {
 // hay una sola subactividad en toda la OT, usa el ancho completo de la barra.
 function dibujarNombresPorSegmento(doc, segmentos, trackX, trackW, startY, C_MUTED) {
   if (!segmentos.length) return startY;
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(4.3); doc.setTextColor(...C_MUTED);
-  const n = segmentos.length;
-  let maxLineas = 1;
-  const datos = segmentos.map((seg, i) => {
-    let x0 = seg.x0, x1 = seg.x1;
-    if (n === 1) { x0 = trackX; x1 = trackX + trackW; }
-    else if (x1 - x0 < 12) {
-      const centro = (x0 + x1) / 2;
-      const limIzq = i > 0 ? (segmentos[i - 1].x1 + x0) / 2 : trackX;
-      const limDer = i < n - 1 ? (x1 + segmentos[i + 1].x0) / 2 : trackX + trackW;
-      x0 = Math.max(centro - 6, limIzq); x1 = Math.min(centro + 6, limDer);
-    }
-    const w = Math.max(x1 - x0, 9);
-    let lineas = doc.splitTextToSize(seg.s.nombre, w);
-    if (lineas.length > 2) lineas = [lineas[0], lineas[1].slice(0, Math.max(lineas[1].length - 3, 3)) + '…'];
-    maxLineas = Math.max(maxLineas, lineas.length);
-    return { cx: (x0 + x1) / 2, lineas };
-  });
-  datos.forEach((d) => doc.text(d.lineas, d.cx, startY + 2, { align: 'center' }));
+  // Antes cada nombre se centraba sobre su propio segmento — con muchos segmentos cortos
+  // seguidos, los textos se montaban entre si y quedaban ilegibles. Ahora se listan en orden
+  // (numerados, de izquierda a derecha igual que los segmentos) como un solo texto que fluye
+  // y se ajusta solo, sin depender de coordenadas por segmento — no puede haber superposicion.
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(4.6); doc.setTextColor(...C_MUTED);
+  const texto = segmentos.map((seg, i) =>
+    `${i + 1}) ${seg.s.nombre} (${fmtDateHour(seg.sIni).split(' ')[0]}–${fmtDateHour(seg.sFin).split(' ')[0]})`
+  ).join('     ');
+  const lineas = doc.splitTextToSize(texto, trackW);
+  doc.text(lineas, trackX, startY + 2.2);
   doc.setTextColor(0, 0, 0);
-  return startY + maxLineas * 2.2 + 2.4;
+  return startY + lineas.length * 2.6 + 2.4;
 }
 
 // Dibuja la fila completa de una OT: titulo, badge de Gantt, franja de Turno A/B, la barra
@@ -3486,10 +3521,20 @@ function dibujarFilaOtLineaTiempo(doc, ot, o) {
 
   segmentos.forEach((seg, idx) => {
     if (idx > 0) {
+      // Solo la linea divisoria blanca — ya no se le pone la hora encima (con muchos
+      // segmentos cortos seguidos esas horas se pisaban entre si y quedaban ilegibles;
+      // la hora de cada subactividad ahora sale en la lista numerada de abajo).
       doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.6);
       doc.line(seg.x0, barY, seg.x0, barY + barH);
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(3.4); doc.setTextColor(90, 90, 90);
-      doc.text(fmtDateHour(seg.sIni).split(' ')[0], seg.x0, barY - 0.7, { align: 'center' });
+    }
+    // Numerito en la esquina del segmento — conecta este tramo con su fila en la lista de
+    // abajo (misma numeracion, de izquierda a derecha) sin tener que escribir el nombre encima.
+    const anchoSeg0 = seg.x1 - seg.x0;
+    if (anchoSeg0 > 3) {
+      doc.setFillColor(255, 255, 255);
+      doc.circle(seg.x0 + 1.6, barY + 1.5, 1.3, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(2.9); doc.setTextColor(60, 60, 60);
+      doc.text(String(idx + 1), seg.x0 + 1.6, barY + 1.9, { align: 'center' });
       doc.setTextColor(0, 0, 0);
     }
     const live = getSubLive(ot.otNum, seg.s.nombre);
@@ -3540,6 +3585,35 @@ function dibujarFilaOtLineaTiempo(doc, ot, o) {
 
 // Escribe un % centrado DENTRO de una barra de color (blanco, negrita). Solo se usa como
 // respaldo cuando una OT no tiene subactividades cargadas (caso raro).
+// ---- Grafico de torta (pie) para "Cumplimiento mecanico por area" — reemplaza la barra
+//      horizontal por un circulo con cunas, como pidio el usuario (imagen de referencia con
+//      "OPERACIONES EJECUTADAS/EMERGENTES/NO EJECUTADAS"). Compartido por los 3 informes. ----
+function dibujarCunaTorta(doc, cx, cy, r, aIni, aFin, color) {
+  const pasos = Math.max(2, Math.ceil(Math.abs(aFin - aIni) / (Math.PI / 60)));
+  const pts = [];
+  for (let i = 0; i <= pasos; i++) {
+    const a = aIni + (aFin - aIni) * (i / pasos);
+    pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
+  }
+  const segs = [[pts[0][0] - cx, pts[0][1] - cy]];
+  for (let i = 1; i < pts.length; i++) segs.push([pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]]);
+  segs.push([cx - pts[pts.length - 1][0], cy - pts[pts.length - 1][1]]);
+  doc.setFillColor(...color);
+  doc.lines(segs, cx, cy, [1, 1], 'F', true);
+}
+function dibujarTortaCumplimiento(doc, cx, cy, r, categorias) {
+  // categorias: [{ valor, color }] — arranca arriba (12 en punto) y avanza en sentido horario
+  const total = categorias.reduce((s, c) => s + c.valor, 0) || 1;
+  let angulo = -Math.PI / 2;
+  categorias.forEach((c) => {
+    if (c.valor <= 0) return;
+    const barrido = (c.valor / total) * Math.PI * 2;
+    dibujarCunaTorta(doc, cx, cy, r, angulo, angulo + barrido, c.color);
+    angulo += barrido;
+  });
+  doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.8); doc.circle(cx, cy, r, 'S');
+}
+
 function dibujarPctEnBarra(doc, x0, x1, barY, barH, real) {
   const texto = `${Math.round(real * 100)}%`;
   const anchoBarra = x1 - x0;
@@ -3756,18 +3830,27 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
     cy += 3;
 
     const totalArea = otsArea.length || 1;
-    ensureSpace(10);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(...C_MUTED);
-    doc.text(`Cumplimiento: ${nEjec}/${otsArea.length} ejecutadas (${Math.round(nEjec / totalArea * 100)}%) · ${nEmerg} emergentes · ${nNoEjec} no ejecutadas`, marginX, cy);
-    cy += 4;
-    const barW = pageW - marginX * 2, barH = 4;
-    let bx = marginX;
-    doc.setFillColor(237, 237, 234); doc.rect(marginX, cy, barW, barH, 'F');
-    if (nEjec) { const w = barW * nEjec / totalArea; doc.setFillColor(31, 169, 113); doc.rect(bx, cy, w, barH, 'F'); bx += w; }
-    if (nEmerg) { const w = barW * nEmerg / totalArea; doc.setFillColor(255, 179, 92); doc.rect(bx, cy, w, barH, 'F'); bx += w; }
-    if (nNoEjec) { const w = barW * nNoEjec / totalArea; doc.setFillColor(224, 65, 62); doc.rect(bx, cy, w, barH, 'F'); }
+    ensureSpace(26);
+    const pieR = 11, pieCX = marginX + pieR + 2, pieCY = cy + pieR;
+    dibujarTortaCumplimiento(doc, pieCX, pieCY, pieR, [
+      { valor: nEjec, color: [47, 123, 246] },
+      { valor: nEmerg, color: [150, 150, 150] },
+      { valor: nNoEjec, color: [224, 65, 62] },
+    ]);
+    const legendX = pieCX + pieR + 8;
+    let legendY = cy + 3;
+    [
+      ['Operaciones ejecutadas', nEjec, [47, 123, 246]],
+      ['Operaciones emergentes', nEmerg, [150, 150, 150]],
+      ['Operaciones no ejecutadas', nNoEjec, [224, 65, 62]],
+    ].forEach(([label, val, col]) => {
+      doc.setFillColor(...col); doc.rect(legendX, legendY - 2.6, 3, 3, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(...C_DARK);
+      doc.text(`${label}: ${val} (${Math.round(val / totalArea * 100)}%)`, legendX + 5, legendY);
+      legendY += 5.5;
+    });
     doc.setTextColor(0, 0, 0);
-    cy += barH + 8;
+    cy += pieR * 2 + 6;
   });
 
   drawFooter();
@@ -4023,18 +4106,27 @@ async function generateInformeTurnoPdf() {
       cy += 3;
 
       const totalArea = otsArea.length || 1;
-      ensureSpace(10);
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(...C_MUTED);
-      doc.text(`Cumplimiento: ${nEjec}/${otsArea.length} ejecutadas (${Math.round(nEjec / totalArea * 100)}%) · ${nEmerg} emergentes · ${nNoEjec} no ejecutadas`, marginX, cy);
-      cy += 4;
-      const barW = pageW - marginX * 2, barH = 4;
-      let bx = marginX;
-      doc.setFillColor(237, 237, 234); doc.rect(marginX, cy, barW, barH, 'F');
-      if (nEjec) { const w = barW * nEjec / totalArea; doc.setFillColor(31, 169, 113); doc.rect(bx, cy, w, barH, 'F'); bx += w; }
-      if (nEmerg) { const w = barW * nEmerg / totalArea; doc.setFillColor(255, 179, 92); doc.rect(bx, cy, w, barH, 'F'); bx += w; }
-      if (nNoEjec) { const w = barW * nNoEjec / totalArea; doc.setFillColor(224, 65, 62); doc.rect(bx, cy, w, barH, 'F'); }
+      ensureSpace(26);
+      const pieR = 11, pieCX = marginX + pieR + 2, pieCY = cy + pieR;
+      dibujarTortaCumplimiento(doc, pieCX, pieCY, pieR, [
+        { valor: nEjec, color: [47, 123, 246] },
+        { valor: nEmerg, color: [150, 150, 150] },
+        { valor: nNoEjec, color: [224, 65, 62] },
+      ]);
+      const legendX = pieCX + pieR + 8;
+      let legendY = cy + 3;
+      [
+        ['Operaciones ejecutadas', nEjec, [47, 123, 246]],
+        ['Operaciones emergentes', nEmerg, [150, 150, 150]],
+        ['Operaciones no ejecutadas', nNoEjec, [224, 65, 62]],
+      ].forEach(([label, val, col]) => {
+        doc.setFillColor(...col); doc.rect(legendX, legendY - 2.6, 3, 3, 'F');
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(...C_DARK);
+        doc.text(`${label}: ${val} (${Math.round(val / totalArea * 100)}%)`, legendX + 5, legendY);
+        legendY += 5.5;
+      });
       doc.setTextColor(0, 0, 0);
-      cy += barH + 8;
+      cy += pieR * 2 + 6;
     });
   }
 
@@ -4202,18 +4294,27 @@ async function generateInformeGeneralPdf() {
     cy += 3;
 
     const totalArea = otsArea.length || 1;
-    ensureSpace(10);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(...C_MUTED);
-    doc.text(`Cumplimiento: ${nEjec}/${otsArea.length} ejecutadas (${Math.round(nEjec / totalArea * 100)}%) · ${nEmerg} emergentes · ${nNoEjec} no ejecutadas`, marginX, cy);
-    cy += 4;
-    const barW = pageW - marginX * 2, barH = 4;
-    let bx = marginX;
-    doc.setFillColor(237, 237, 234); doc.rect(marginX, cy, barW, barH, 'F');
-    if (nEjec) { const w = barW * nEjec / totalArea; doc.setFillColor(31, 169, 113); doc.rect(bx, cy, w, barH, 'F'); bx += w; }
-    if (nEmerg) { const w = barW * nEmerg / totalArea; doc.setFillColor(255, 179, 92); doc.rect(bx, cy, w, barH, 'F'); bx += w; }
-    if (nNoEjec) { const w = barW * nNoEjec / totalArea; doc.setFillColor(224, 65, 62); doc.rect(bx, cy, w, barH, 'F'); }
+    ensureSpace(26);
+    const pieR = 11, pieCX = marginX + pieR + 2, pieCY = cy + pieR;
+    dibujarTortaCumplimiento(doc, pieCX, pieCY, pieR, [
+      { valor: nEjec, color: [47, 123, 246] },
+      { valor: nEmerg, color: [150, 150, 150] },
+      { valor: nNoEjec, color: [224, 65, 62] },
+    ]);
+    const legendX = pieCX + pieR + 8;
+    let legendY = cy + 3;
+    [
+      ['Operaciones ejecutadas', nEjec, [47, 123, 246]],
+      ['Operaciones emergentes', nEmerg, [150, 150, 150]],
+      ['Operaciones no ejecutadas', nNoEjec, [224, 65, 62]],
+    ].forEach(([label, val, col]) => {
+      doc.setFillColor(...col); doc.rect(legendX, legendY - 2.6, 3, 3, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(...C_DARK);
+      doc.text(`${label}: ${val} (${Math.round(val / totalArea * 100)}%)`, legendX + 5, legendY);
+      legendY += 5.5;
+    });
     doc.setTextColor(0, 0, 0);
-    cy += barH + 8;
+    cy += pieR * 2 + 6;
   });
   ensureSpace(14); seccion('Componentes retirados / cambiados por actividad');
   const compItems = state.componentes.slice().sort((a, b) =>

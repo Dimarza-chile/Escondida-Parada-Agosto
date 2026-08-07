@@ -510,6 +510,15 @@ input[type=range]::-webkit-slider-thumb{
   background:var(--brand-soft); color:var(--brand); border:1px dashed var(--brand);
   font-family:var(--sans); font-size:11.5px; font-weight:700; cursor:pointer;
 }
+/* Boton "X" para borrar una actividad emergente (OT completa o un polin puntual), con
+   confirmacion antes de ejecutar — por si se agrego una por error. */
+.btn-x-emergente{
+  display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px;
+  border-radius:50%; background:rgba(255,92,90,.14); color:#D9302E; border:1px solid rgba(255,92,90,.4);
+  font-size:12px; font-weight:800; cursor:pointer; flex:none; line-height:1;
+}
+.btn-x-emergente:hover{ background:rgba(255,92,90,.28); }
+.btn-x-emergente-mini{ width:20px; height:20px; margin-left:2px; }
 .polin-comentario-grupo{
   width:100%; margin-top:8px; padding:7px 8px; border-radius:7px; background: var(--navy-soft);
   color: var(--ink); border:1px solid var(--line); font-family: var(--sans); font-size:11.5px;
