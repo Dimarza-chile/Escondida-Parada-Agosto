@@ -286,6 +286,19 @@ function computeCurve() {
   const emergentes = allOts().filter((o) => o.tipo === 'Emergente');
   const sumPesoPlan = planificados.reduce((s, o) => s + o.pesoPlanHH, 0);
 
+  // Polines emergentes (agregados en terreno con "+ Polín emergente") tambien cuentan como
+  // alcance emergente en la Curva S, con las HH que se les cargo al agregarlos. Su avance es
+  // binario: cambiado (100%) o no (0%), a diferencia de una OT que tiene subactividades.
+  const polinesEmerg = (state.polinesEmergentes || []).filter((p) => p.pesoPlanHH > 0);
+  function progresoPolinEmerg(p, turnoIdx) {
+    const e = state.polinesEstado[polinKey(p.otNum, p.id)];
+    if (!e || e.estado !== 'Cambiado') return 0;
+    // Si el cambio se registro en un turno posterior al que estamos evaluando, todavia no cuenta
+    const turnoCambio = SEED_DATA.turnoLabels.indexOf(e.turno);
+    if (turnoCambio >= 0 && turnoCambio > turnoIdx) return 0;
+    return 1;
+  }
+
   const percentReal = [], alcanceEmerg = [], percentRealTotal = [];
   for (let i = 0; i < N; i++) {
     if (i > lastRep) { percentReal.push(null); percentRealTotal.push(null); }
@@ -296,15 +309,17 @@ function computeCurve() {
 
       let numEmerg = 0;
       emergentes.forEach((o) => { numEmerg += o.pesoPlanHH * otProgressAt(o, i); });
+      polinesEmerg.forEach((p) => { numEmerg += p.pesoPlanHH * progresoPolinEmerg(p, i); });
       percentRealTotal.push((num + numEmerg) / total);
     }
     const turnoDate = new Date(SEED_DATA.turnos[i]);
     let emergHH = 0;
     emergentes.forEach((o) => { if (new Date(o.fechaDeteccion) <= turnoDate) emergHH += o.pesoPlanHH; });
+    polinesEmerg.forEach((p) => { if (new Date(p.fechaDeteccion) <= turnoDate) emergHH += p.pesoPlanHH; });
     alcanceEmerg.push((total + emergHH) / total);
   }
 
-  const hhEmergentes = emergentes.reduce((s, o) => s + o.pesoPlanHH, 0);
+  const hhEmergentes = emergentes.reduce((s, o) => s + o.pesoPlanHH, 0) + polinesEmerg.reduce((s, p) => s + p.pesoPlanHH, 0);
   const canceladas = planificados.filter((o) => getOtEstado(o.otNum).startsWith('Cancelada'));
   const hhCanceladas = canceladas.reduce((s, o) => s + o.pesoPlanHH, 0);
   const netoHH = hhEmergentes - hhCanceladas;
@@ -367,7 +382,14 @@ function renderList() {
       const supColorA = colorForSupervisor(supA);
       const supColorB = colorForSupervisor(supB);
       const supTag = (supA || supB) ? `<div class="supervisor-tags">${supA ? `<span class="supervisor-tag" style="color:${supColorA}"><i style="background:${supColorA}"></i>A: ${supA}</span>` : ''}${supB ? `<span class="supervisor-tag" style="color:${supColorB}"><i style="background:${supColorB}"></i>B: ${supB}</span>` : ''}</div>` : '';
-      const cardStyle = (!isEmerg && !isCancel) ? `style="border-left:3px solid ${colorForSupervisor(getOtSupervisor(ot.otNum)) || 'transparent'};"` : '';
+      const cardStyle = (() => {
+        if (isCancel) return `style="border-left:3px solid var(--cancelada);"`;
+        if (isEmerg) return `style="border-left:3px solid var(--emergente);"`;
+        const ini = new Date(ot.inicio), ahora = new Date();
+        const expected = expectedPctNow(ot, ahora);
+        const behind = ahora > ini && pct < expected - 0.1 && pct < 0.999;
+        return `style="border-left:3px solid ${behind ? 'var(--cancelada)' : 'var(--atiempo)'};"`;
+      })();
 
       if (esCampaniaPolines(ot)) {
         const pPct = polinesPct(ot.otNum);
@@ -486,7 +508,11 @@ function renderList() {
     });
   });
   wrap.querySelectorAll('[data-direct]').forEach((el) => {
-    el.addEventListener('click', () => openSheetDirect(el.dataset.direct));
+    el.addEventListener('click', () => {
+      state.otSeleccionada = el.dataset.direct;
+      openSheetDirect(el.dataset.direct);
+      renderList();
+    });
   });
   wrap.querySelectorAll('[data-polines]').forEach((el) => {
     el.addEventListener('click', () => {
@@ -919,6 +945,7 @@ function renderGanttOverview() {
       if (ot) {
         state.otSeleccionada = otNum;
         abrirDetalleOt(otNum);
+        renderList();
         return;
       }
       state.ganttSelectedOt = otNum;
@@ -1477,11 +1504,16 @@ function listenPolinesEmergentes() {
 
 async function agregarPolinEmergente(otNum, datos) {
   const correa = (todosLosPolinesDeOt(otNum)[0] || {}).correa || '';
-  await polinesEmergentesCollection().add({
+  // fecha/hora de inicio = el turno actual (no se pregunta, se asume que se detecto ahora)
+  const fechaDeteccion = SEED_DATA.turnos[turnoActualIdx()] || new Date().toISOString();
+  const doc = {
     otNum, correa: datos.correa || correa, estacion: datos.estacion, ubicacion: datos.ubicacion,
     posicion: datos.posicion || '', tipoEstacion: datos.tipoEstacion || '', descripcion: datos.descripcion, cantidad: datos.cantidad || 1,
+    pesoPlanHH: datos.pesoPlanHH || 0, fechaDeteccion,
     emergente: true, createdAt: Date.now(),
-  });
+  };
+  if (datos.criticidad) doc.criticidad = datos.criticidad;
+  await polinesEmergentesCollection().add(doc);
 }
 
 function listenPolines() {
@@ -1635,14 +1667,17 @@ function ensurePolinesModal() {
           <option value="Carga">Carga</option>
           <option value="Retorno">Retorno</option>
         </select>
-        <label style="display:block; font-size:12px; color:var(--ink-muted); margin-bottom:6px;">Posición del polín (déjalo en blanco si vas a retirar 2 o más y aún no sabes cuáles)</label>
-        <select id="polinEmergPosicion" style="width:100%; padding:12px; border-radius:10px; background:var(--navy-soft); color:var(--ink); border:1px solid var(--line); font-family:var(--sans); font-size:14px; margin-bottom:14px;"></select>
+        <label style="display:block; font-size:12px; color:var(--ink-muted); margin-bottom:6px;">Posición(es) del polín (déjalo en blanco si aún no sabes cuál — puedes agregar varias si son de la misma estación)</label>
+        <div id="polinEmergPosicionesWrap"></div>
+        <button type="button" id="btnAgregarPosicionEmerg" style="width:100%; padding:10px; border-radius:10px; background:var(--brand-soft); color:var(--brand); border:1px dashed var(--brand); font-family:var(--sans); font-size:13px; font-weight:700; cursor:pointer; margin-bottom:14px;">+ Agregar otra posición de esta estación</button>
         <label style="display:block; font-size:12px; color:var(--ink-muted); margin-bottom:6px;">Tipo de estación (opcional)</label>
         <input type="text" id="polinEmergTipo" placeholder="Ej: Impacto, Normal, Autoalineante" style="width:100%; padding:12px; border-radius:10px; background:var(--navy-soft); color:var(--ink); border:1px solid var(--line); font-family:var(--sans); font-size:14px; margin-bottom:14px;">
         <label style="display:block; font-size:12px; color:var(--ink-muted); margin-bottom:6px;">Descripción de la falla</label>
         <input type="text" id="polinEmergDesc" placeholder="Ej: Polín trabado con material" style="width:100%; padding:12px; border-radius:10px; background:var(--navy-soft); color:var(--ink); border:1px solid var(--line); font-family:var(--sans); font-size:14px; margin-bottom:14px;">
         <label style="display:block; font-size:12px; color:var(--ink-muted); margin-bottom:6px;">Cantidad</label>
-        <input type="number" id="polinEmergCantidad" value="1" min="1" step="1" style="width:100%; padding:12px; border-radius:10px; background:var(--navy-soft); color:var(--ink); border:1px solid var(--line); font-family:var(--mono); font-size:14px; margin-bottom:18px;">
+        <input type="number" id="polinEmergCantidad" value="1" min="1" step="1" style="width:100%; padding:12px; border-radius:10px; background:var(--navy-soft); color:var(--ink); border:1px solid var(--line); font-family:var(--mono); font-size:14px; margin-bottom:14px;">
+        <label style="display:block; font-size:12px; color:var(--ink-muted); margin-bottom:6px;">HH trabajadas (para que se refleje en la Curva S)</label>
+        <input type="number" id="polinEmergHH" value="1" min="0" step="0.5" style="width:100%; padding:12px; border-radius:10px; background:var(--navy-soft); color:var(--ink); border:1px solid var(--line); font-family:var(--mono); font-size:14px; margin-bottom:18px;">
         <div class="sheet-actions">
           <button class="btn ghost" id="polinEmergCancel">Cancelar</button>
           <button class="btn primary" id="polinEmergSave">Agregar</button>
@@ -1658,19 +1693,45 @@ function ensurePolinesModal() {
 
   // Las opciones de "Posicion" dependen de si el polin es de Carga (izq/central/der,
   // + la opcion de cama de impacto que agrupa toda la estacion) o de Retorno (izq/der).
-  function actualizarOpcionesPosicion() {
+  // Puede haber VARIAS filas de posicion (una por cada polin de la misma estacion).
+  function opcionesPosicionActuales() {
     const ubic = document.getElementById('polinEmergUbicacion').value;
     const correa = document.getElementById('polinEmergCorrea').value.trim();
     const tipo = document.getElementById('polinEmergTipo').value.trim();
-    const sel = document.getElementById('polinEmergPosicion');
-    const valorPrevio = sel.value;
-    const opciones = opcionesPosicionPolin(ubic, correa, tipo);
-    sel.innerHTML = opciones.map((o) => `<option value="${o}">${o || '— Sin especificar —'}</option>`).join('');
-    if (opciones.includes(valorPrevio)) sel.value = valorPrevio;
+    return opcionesPosicionPolin(ubic, correa, tipo);
+  }
+  function crearFilaPosicion(valorInicial) {
+    const wrap = document.getElementById('polinEmergPosicionesWrap');
+    const fila = document.createElement('div');
+    fila.style.cssText = 'display:flex; gap:6px; margin-bottom:8px;';
+    const sel = document.createElement('select');
+    sel.className = 'polin-emerg-posicion-select';
+    sel.style.cssText = 'flex:1; padding:12px; border-radius:10px; background:var(--navy-soft); color:var(--ink); border:1px solid var(--line); font-family:var(--sans); font-size:14px;';
+    fila.appendChild(sel);
+    const btnX = document.createElement('button');
+    btnX.type = 'button'; btnX.textContent = '✕';
+    btnX.style.cssText = 'padding:0 14px; border-radius:10px; background:none; border:1px solid var(--line); color:var(--ink-muted); cursor:pointer; font-family:var(--sans);';
+    btnX.addEventListener('click', () => {
+      if (document.querySelectorAll('.polin-emerg-posicion-select').length <= 1) return;
+      fila.remove();
+    });
+    fila.appendChild(btnX);
+    wrap.appendChild(fila);
+    actualizarOpcionesPosicion();
+    if (valorInicial !== undefined) sel.value = valorInicial;
+  }
+  function actualizarOpcionesPosicion() {
+    const opciones = opcionesPosicionActuales();
+    document.querySelectorAll('.polin-emerg-posicion-select').forEach((sel) => {
+      const valorPrevio = sel.value;
+      sel.innerHTML = opciones.map((o) => `<option value="${o}">${o || '— Sin especificar —'}</option>`).join('');
+      if (opciones.includes(valorPrevio)) sel.value = valorPrevio;
+    });
   }
   document.getElementById('polinEmergUbicacion').addEventListener('change', actualizarOpcionesPosicion);
   document.getElementById('polinEmergCorrea').addEventListener('input', actualizarOpcionesPosicion);
   document.getElementById('polinEmergTipo').addEventListener('input', actualizarOpcionesPosicion);
+  document.getElementById('btnAgregarPosicionEmerg').addEventListener('click', () => crearFilaPosicion());
 
   document.getElementById('btnAddPolinEmergente').addEventListener('click', () => {
     if (!polinesSheetOtNum) return;
@@ -1678,11 +1739,12 @@ function ensurePolinesModal() {
     document.getElementById('polinEmergCorrea').value = (items[0] && items[0].correa) || '';
     document.getElementById('polinEmergEstacion').value = '';
     document.getElementById('polinEmergUbicacion').value = 'Carga';
-    actualizarOpcionesPosicion();
-    document.getElementById('polinEmergPosicion').value = '';
+    document.getElementById('polinEmergPosicionesWrap').innerHTML = '';
+    crearFilaPosicion('');
     document.getElementById('polinEmergTipo').value = '';
     document.getElementById('polinEmergDesc').value = '';
     document.getElementById('polinEmergCantidad').value = '1';
+    document.getElementById('polinEmergHH').value = '1';
     document.getElementById('polinEmergBackdrop').classList.add('open');
   });
   document.getElementById('polinEmergCancel').addEventListener('click', () => {
@@ -1698,13 +1760,28 @@ function ensurePolinesModal() {
     const btn = document.getElementById('polinEmergSave');
     btn.disabled = true; btn.textContent = 'Guardando…';
     try {
-      await agregarPolinEmergente(polinesSheetOtNum, {
+      const posiciones = [...document.querySelectorAll('.polin-emerg-posicion-select')].map((s) => s.value);
+      const hhIngresadas = parseFloat(document.getElementById('polinEmergHH').value) || 0;
+      const datosBase = {
         correa: document.getElementById('polinEmergCorrea').value.trim(),
         estacion, ubicacion: document.getElementById('polinEmergUbicacion').value,
-        posicion: document.getElementById('polinEmergPosicion').value,
         tipoEstacion: document.getElementById('polinEmergTipo').value.trim(),
-        descripcion: desc, cantidad: parseInt(document.getElementById('polinEmergCantidad').value, 10) || 1,
-      });
+        descripcion: desc,
+      };
+      // Si hay una sola fila de posicion, respeta el campo Cantidad (para "2 sin especificar").
+      // Si hay varias filas, cada una es un polin individual (cantidad 1 cada uno). Las HH
+      // ingresadas se reparten entre todas las posiciones para no duplicar el total en la Curva S.
+      if (posiciones.length <= 1) {
+        await agregarPolinEmergente(polinesSheetOtNum, {
+          ...datosBase, posicion: posiciones[0] || '',
+          cantidad: parseInt(document.getElementById('polinEmergCantidad').value, 10) || 1,
+          pesoPlanHH: hhIngresadas,
+        });
+      } else {
+        const hhPorPosicion = hhIngresadas / posiciones.length;
+        await Promise.all(posiciones.map((posicion) =>
+          agregarPolinEmergente(polinesSheetOtNum, { ...datosBase, posicion, cantidad: 1, pesoPlanHH: hhPorPosicion })));
+      }
       showToast('Polín emergente agregado ✓');
       document.getElementById('polinEmergBackdrop').classList.remove('open');
     } catch (e) {
@@ -1859,6 +1936,56 @@ function expandirPolinesConCantidad(items) {
   return resultado;
 }
 
+// Cuando varias filas comparten la misma estacion (ej. 3 polines emergentes del mismo
+// bastidor de carga), se juntan en UNA sola tarjeta con una fila compacta por posicion
+// (checkbox + selector de Posicion) en vez de una tarjeta completa repetida por cada una.
+// Sin fotos individuales aqui — el comentario es compartido para todo el grupo.
+function polinGrupoHtml(sub, otNum) {
+  const primero = sub.items[0];
+  const critLabels = { 1: 'Alta', 2: 'Media', 3: 'Baja' };
+  const critSymbols = { 1: '✕', 2: '❙', 3: '✓' };
+  const critBadge = primero.criticidad ? `<span class="crit-tag crit-${primero.criticidad}">${critSymbols[primero.criticidad]} ${critLabels[primero.criticidad]}</span>` : '';
+  const emergBadge = primero.emergente ? `<span class="crit-tag" style="background:rgba(255,179,92,.2); color:var(--emergente);">EMERGENTE</span>` : '';
+  const opcionesPos = opcionesPosicionPolin(primero.ubicacion, primero.correa, primero.tipoEstacion);
+
+  const filas = sub.items.map((p) => {
+    const e = state.polinesEstado[polinKey(otNum, p.id)];
+    const cambiado = e && e.estado === 'Cambiado';
+    const posicionActual = (e && e.posicionManual) || p.posicion || '';
+    const selector = `<select class="polin-posicion-select" data-possel="${p.id}">${opcionesPos.map((o) =>
+      `<option value="${o}" ${o === posicionActual ? 'selected' : ''}>${o || '— Posición —'}</option>`).join('')}</select>`;
+    return `
+      <div class="polin-pos-fila" data-posfila="${p.id}">
+        <div class="polin-check ${cambiado ? 'marcado' : ''}" data-checkpos="${p.id}">${cambiado ? '✓' : ''}</div>
+        ${selector}
+      </div>`;
+  }).join('');
+
+  let comentarioComun = '';
+  for (const p of sub.items) {
+    const e = state.polinesEstado[polinKey(otNum, p.id)];
+    if (e && e.comentario) { comentarioComun = e.comentario; break; }
+  }
+  const idsGrupo = sub.items.map((p) => p.id).join(',');
+  const descEsc = (primero.descripcion || '').replace(/"/g, '&quot;');
+
+  return `
+    <div class="polin-row polin-grupo">
+      <div class="polin-info">
+        <div class="polin-titulo">${critBadge}${emergBadge}${primero.tipoEstacion || 'Cambio'} · ${sub.items.length} polines</div>
+        <div class="polin-desc">${primero.descripcion || ''}</div>
+        <div class="polin-posiciones-grupo">${filas}</div>
+        <button type="button" class="btn-agregar-posicion-grupo"
+          data-otnum="${otNum}" data-correa="${primero.correa || ''}" data-estacion="${sub.estacion || ''}"
+          data-ubicacion="${primero.ubicacion || ''}" data-tipo="${primero.tipoEstacion || ''}"
+          data-desc="${descEsc}" data-crit="${primero.criticidad || ''}" data-emerg="${primero.emergente ? '1' : ''}">
+          + Agregar otra posición de esta estación
+        </button>
+        <textarea class="polin-comentario-grupo" data-comentariogrupo="${idsGrupo}" placeholder="Comentario: por qué se cambió o por qué no (opcional)">${comentarioComun}</textarea>
+      </div>
+    </div>`;
+}
+
 function renderPolinesList() {
   const otNum = polinesSheetOtNum;
   const wrap = document.getElementById('polinesListWrap');
@@ -1918,18 +2045,46 @@ function renderPolinesList() {
 
     const rowsHtml = subgrupos.map((sub) => {
       if (sub.items.length === 1) return polinRowHtml(sub.items[0], otNum, true);
-      // Mas de un cambio en la misma estacion: un mini-encabezado + cada cambio sin repetir "Estación N"
-      const subRows = sub.items.map((p) => polinRowHtml(p, otNum, false)).join('');
-      return `<div class="polin-subestacion-header">Estación ${sub.estacion || '—'} — ${sub.items.length} cambios</div>
-        <div class="polin-subestacion-grupo">${subRows}</div>`;
+      return `<div class="polin-subestacion-header">Estación ${sub.estacion || '—'} — ${sub.items.length} cambios</div>${polinGrupoHtml(sub, otNum)}`;
     }).join('');
     return `<div class="polines-group-header">${gk}</div>${rowsHtml}`;
   }).join('');
 
-  wrap.querySelectorAll('.polin-row').forEach((row) => {
+  wrap.querySelectorAll('.polin-row:not(.polin-grupo)').forEach((row) => {
     row.addEventListener('click', () => {
       const p = items.find((x) => String(x.id) === row.dataset.polinid);
       if (p) togglePolinEstado(otNum, p);
+    });
+  });
+  wrap.querySelectorAll('.polin-check[data-checkpos]').forEach((chk) => {
+    chk.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const p = items.find((x) => String(x.id) === chk.dataset.checkpos);
+      if (p) togglePolinEstado(otNum, p);
+    });
+  });
+  wrap.querySelectorAll('.polin-comentario-grupo').forEach((ta) => {
+    ta.addEventListener('click', (e) => e.stopPropagation());
+    ta.addEventListener('blur', async (e) => {
+      const ids = ta.dataset.comentariogrupo.split(',');
+      await Promise.all(ids.map((id) => {
+        const p = items.find((x) => String(x.id) === id);
+        return p ? savePolinComentario(otNum, p, e.target.value) : Promise.resolve();
+      }));
+    });
+  });
+  wrap.querySelectorAll('.btn-agregar-posicion-grupo').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      btn.disabled = true; btn.textContent = 'Agregando…';
+      try {
+        await agregarPolinEmergente(btn.dataset.otnum, {
+          correa: btn.dataset.correa, estacion: btn.dataset.estacion, ubicacion: btn.dataset.ubicacion,
+          tipoEstacion: btn.dataset.tipo, descripcion: btn.dataset.desc,
+          criticidad: btn.dataset.crit ? parseInt(btn.dataset.crit, 10) : undefined,
+          posicion: '', cantidad: 1,
+        });
+      } catch (err) { console.error(err); showToast('No se pudo agregar la posición'); }
     });
   });
   wrap.querySelectorAll('.polin-comentario').forEach((ta) => {
@@ -3896,7 +4051,59 @@ async function generateInformeGeneralPdf() {
   });
   cy += 6;
 
-  // ---- Componentes retirados/cambiados por actividad (SAP, descripcion, cantidad, foto) ----
+  // ---- Cumplimiento mecanico por area: tabla OT/Descripcion/%Ejecucion + barra de
+  //      cumplimiento, una seccion por cada area (CORREA 201, CORREA 202, FEEDER 207, etc.) ----
+  ensureSpace(14); seccion('Cumplimiento mecánico por área');
+  const areasOrdenadas = [...new Set(allOts().map((o) => o.area))].sort();
+  areasOrdenadas.forEach((area) => {
+    const otsArea = allOts().filter((o) => o.area === area);
+    if (!otsArea.length) return;
+    ensureSpace(14);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...brandRGB);
+    doc.text(area, marginX, cy); cy += 5;
+    doc.setTextColor(0, 0, 0);
+
+    const colsArea = [{ w: 22, label: 'OT' }, { w: 0, label: 'Descripción' }, { w: 28, label: '% Ejecución' }];
+    colsArea[1].w = (pageW - marginX * 2) - colsArea[0].w - colsArea[2].w;
+    function headerTablaArea() {
+      let x = marginX;
+      colsArea.forEach((c) => { cell(x, cy, c.w, 6, c.label, { bold: true, fill: [230, 230, 226], size: 6.5 }); x += c.w; });
+      cy += 6;
+    }
+    ensureSpace(8); headerTablaArea();
+    let nEjec = 0, nEmerg = 0, nNoEjec = 0;
+    otsArea.forEach((ot) => {
+      const rowH = 6;
+      if (cy + rowH > pageH - 16) { newPage(); headerTablaArea(); }
+      const pct = otProgressAt(ot, SEED_DATA.turnoLabels.length - 1);
+      const esEmerg = ot.tipo === 'Emergente';
+      let txtPct;
+      if (esEmerg) { txtPct = 'EMERGENTE'; nEmerg++; }
+      else {
+        txtPct = Math.round(pct * 100) + '%';
+        if (pct <= 0.001) nNoEjec++; else nEjec++;
+      }
+      let x = marginX;
+      const vals = [String(ot.otNum), ot.descripcion, txtPct];
+      colsArea.forEach((c, i) => { cell(x, cy, c.w, rowH, vals[i], { size: 6.5, color: (esEmerg && i === 2) ? [180, 90, 20] : C_DARK }); x += c.w; });
+      cy += rowH;
+    });
+    cy += 3;
+
+    const totalArea = otsArea.length || 1;
+    ensureSpace(10);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(...C_MUTED);
+    doc.text(`Cumplimiento: ${nEjec}/${otsArea.length} ejecutadas (${Math.round(nEjec / totalArea * 100)}%) · ${nEmerg} emergentes · ${nNoEjec} no ejecutadas`, marginX, cy);
+    cy += 4;
+    const barW = pageW - marginX * 2, barH = 4;
+    let bx = marginX;
+    doc.setFillColor(237, 237, 234); doc.rect(marginX, cy, barW, barH, 'F');
+    if (nEjec) { const w = barW * nEjec / totalArea; doc.setFillColor(31, 169, 113); doc.rect(bx, cy, w, barH, 'F'); bx += w; }
+    if (nEmerg) { const w = barW * nEmerg / totalArea; doc.setFillColor(255, 179, 92); doc.rect(bx, cy, w, barH, 'F'); bx += w; }
+    if (nNoEjec) { const w = barW * nNoEjec / totalArea; doc.setFillColor(224, 65, 62); doc.rect(bx, cy, w, barH, 'F'); }
+    doc.setTextColor(0, 0, 0);
+    cy += barH + 8;
+  });
   ensureSpace(14); seccion('Componentes retirados / cambiados por actividad');
   const compItems = state.componentes.slice().sort((a, b) =>
     (a.area || '').localeCompare(b.area || '') || String(a.otNum).localeCompare(String(b.otNum)));

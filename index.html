@@ -160,11 +160,12 @@
     #btnVolverLineaTiempoDesktop{ display:none; }
     body:not(.en-inicio):has(#sheetBackdrop.tiene-seleccion) #btnVolverLineaTiempoDesktop,
     body:not(.en-inicio):has(#polinesSheetBackdrop.open) #btnVolverLineaTiempoDesktop{
-      display:inline-flex; align-items:center; gap:6px; margin:14px 20px 0; padding:8px 14px;
-      background:#fff; border:1px solid var(--line); border-radius:10px; font-size:13px;
-      font-weight:700; color:var(--brand); cursor:pointer; width:fit-content; font-family:var(--sans);
+      display:inline-flex; align-items:center; gap:7px; margin:14px 20px 0; padding:10px 18px;
+      background:var(--brand); border:none; border-radius:10px; font-size:13.5px;
+      font-weight:700; color:#fff; cursor:pointer; width:fit-content; font-family:var(--sans);
+      box-shadow:0 2px 8px rgba(255,122,30,.35);
     }
-    #btnVolverLineaTiempoDesktop:hover{ background:var(--brand-soft); }
+    #btnVolverLineaTiempoDesktop:hover{ background:#E86D15; }
 
     body:not(.en-inicio) #sheetBackdrop:not(.tiene-seleccion){ display:none; }
 
@@ -241,6 +242,11 @@
     .sub-row .sub-pct{ font-size:18px; font-weight:700; }
     .polin-titulo{ font-size:17px; }
     .polin-posicion-tag{ font-size:13px; padding:2px 8px; }
+    .polin-posiciones-grupo{ gap:9px; }
+    .polin-pos-fila .polin-check{ width:26px; height:26px; }
+    .polin-pos-fila .polin-posicion-select{ font-size:15px; padding:10px; }
+    .btn-agregar-posicion-grupo{ font-size:14px; padding:12px; }
+    .polin-comentario-grupo{ font-size:15.5px; padding:12px; }
     .polin-desc{ font-size:15.5px; line-height:1.45; }
     .polin-comentario{ font-size:15.5px; padding:12px; }
     .polin-posicion-label{ font-size:14px; margin-top:10px; }
@@ -249,7 +255,7 @@
     .polin-foto-btn{ font-size:14.5px; padding:12px 6px; }
     .polin-meta{ font-size:13px; }
     .polines-group-header{ font-size:13.5px; letter-spacing:.05em; margin:20px 0 8px; }
-    .polin-subestacion-header{ font-size:13px; margin:14px 0 3px 8px; }
+    .polin-subestacion-header{ font-size:18px; margin:18px 0 6px 8px; }
     .polines-resumen{ font-size:16px; padding:13px 14px; }
     .criticidad-legend{ gap:10px; margin:14px 0 6px; }
     .crit-tag{ font-size:13px; padding:5px 11px; border-radius:8px; }
