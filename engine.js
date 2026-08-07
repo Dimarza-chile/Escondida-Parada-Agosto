@@ -3263,6 +3263,132 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
     ? allOts().filter((o) => otCoincideConParSupervisor(o, supervisorFiltro))
     : allOts();
 
+  // ---- Línea de tiempo: va primero, con particiones de subactividades y turnos A/B ----
+  const C_ATIEMPO = [31, 169, 113], C_ATRASADO = [224, 65, 62], C_EMERG = [255, 179, 92];
+  const C_BANDA = [230, 241, 251], C_BANDB = [243, 243, 240];
+  function badgeMini(x, y, txt, bg, fg) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(6.3);
+    const w = doc.getTextWidth(txt) + 4;
+    doc.setFillColor(...bg); doc.roundedRect(x - w, y - 2.6, w, 3.6, 1, 1, 'F');
+    doc.setTextColor(...fg); doc.text(txt, x - w / 2, y - 0.3, { align: 'center' });
+    doc.setTextColor(0, 0, 0);
+    return w;
+  }
+  if (ots.length > 0) {
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...C_DARK);
+    ensureSpace(14); doc.text('Línea de tiempo', marginX, cy);
+    cy += 5.5;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(...C_MUTED);
+    doc.text('Turno A: 07:00–19:00 · Turno B: 19:00–07:00. Un solo color por OT según su estado; lo emergente va aparte.', marginX, cy);
+    cy += 4.5;
+    let lx = marginX;
+    [['A tiempo', C_ATIEMPO], ['Atrasado', C_ATRASADO], ['Emergente', C_EMERG]].forEach(([label, col]) => {
+      doc.setFillColor(...col); doc.rect(lx, cy - 2.2, 2.6, 2.6, 'F');
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(...C_MUTED);
+      doc.text(label, lx + 4, cy);
+      lx += doc.getTextWidth(label) + 12;
+    });
+    doc.setTextColor(0, 0, 0);
+    cy += 6;
+
+    const now = new Date();
+    const boundaries = SEED_DATA.turnos.map((t) => new Date(t));
+
+    ots.forEach((ot) => {
+      const ini = new Date(ot.inicio), fin = new Date(ot.fin);
+      const spanMs = Math.max(fin - ini, 1);
+      const subs = (ot.subactividades || []).slice().sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
+      const emergs = (SEED_DATA.complementarias || []).filter((c) => c.otRelacionada === ot.otNum);
+      const alturaEstim = 20 + (subs.length ? 4 : 0) + (emergs.length ? 4 : 0);
+      ensureSpace(alturaEstim);
+
+      const real = otProgressAt(ot, SEED_DATA.turnoLabels.length - 1);
+      const expected = expectedPctNow(ot, now);
+      const behind = now > ini && real < expected - 0.1 && real < 0.999;
+      const esEmergOt = ot.tipo === 'Emergente';
+      const colorOt = esEmergOt ? C_EMERG : (behind ? C_ATRASADO : C_ATIEMPO);
+
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(8.3); doc.setTextColor(...C_DARK);
+      doc.text(`OT ${ot.otNum} — ${ot.descripcion}`, marginX, cy, { maxWidth: pageW - marginX * 2 });
+      cy += 4;
+
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(...C_MUTED);
+      doc.text(`${fmtDateHour(ot.inicio)} → ${fmtDateHour(ot.fin)}`, marginX, cy);
+      doc.setTextColor(0, 0, 0);
+      let bx = pageW - marginX;
+      bx -= badgeMini(bx, cy, `Real: ${Math.round(real * 100)}%`, real + 0.001 < expected ? [252, 235, 235] : [234, 243, 222], real + 0.001 < expected ? [121, 31, 31] : [39, 80, 10]);
+      bx -= 2;
+      bx -= badgeMini(bx, cy, `De acuerdo a Gantt: ${Math.round(expected * 100)}%`, C_BANDA, [12, 68, 124]);
+      cy += 3;
+
+      const trackX = marginX, trackW = pageW - marginX * 2;
+      // Franjas de Turno A / Turno B detras del track
+      const bandaY = cy, bandaH = 3.4;
+      for (let i = 0; i < boundaries.length - 1; i++) {
+        const s = boundaries[i], e = boundaries[i + 1];
+        if (e < ini || s > fin) continue;
+        const cs = s < ini ? ini : s, ce = e > fin ? fin : e;
+        const x0 = trackX + ((cs - ini) / spanMs) * trackW;
+        const x1 = trackX + ((ce - ini) / spanMs) * trackW;
+        const esDia = s.getHours() === 7;
+        doc.setFillColor(...(esDia ? C_BANDA : C_BANDB));
+        doc.rect(x0, bandaY, Math.max(x1 - x0, 0.2), bandaH, 'F');
+        if (x1 - x0 > 7) {
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(4.6);
+          doc.setTextColor(...(esDia ? [12, 68, 124] : [130, 130, 124]));
+          doc.text(esDia ? 'Turno A' : 'Turno B', (x0 + x1) / 2, bandaY + 2.3, { align: 'center' });
+        }
+      }
+      doc.setTextColor(0, 0, 0);
+      cy += bandaH + 1.2;
+
+      // Barra principal: UN solo color para toda la OT, con particiones (lineas blancas) por subactividad
+      const barY = cy, barH = 4.4;
+      doc.setFillColor(...colorOt);
+      doc.roundedRect(trackX, barY, trackW, barH, 0.7, 0.7, 'F');
+      subs.forEach((s, idx) => {
+        if (idx === 0) return;
+        const t = new Date(s.inicio);
+        if (t <= ini || t >= fin) return;
+        const x = trackX + ((t - ini) / spanMs) * trackW;
+        doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.6);
+        doc.line(x, barY, x, barY + barH);
+      });
+      if (now >= ini && now <= fin) {
+        const xNow = trackX + ((now - ini) / spanMs) * trackW;
+        doc.setDrawColor(26, 26, 26); doc.setLineWidth(0.5);
+        doc.line(xNow, barY - 1, xNow, barY + barH + 1);
+      }
+      cy += barH + 1;
+
+      // Actividades emergentes ligadas a esta OT: siempre aparte, en naranja, sin logica de atraso
+      if (emergs.length) {
+        const emY = cy, emH = 2.4;
+        emergs.forEach((c) => {
+          const cs = new Date(c.inicio), ce = new Date(c.fin);
+          if (ce < ini || cs > fin) return;
+          const x0 = trackX + ((Math.max(cs, ini) - ini) / spanMs) * trackW;
+          const x1 = trackX + ((Math.min(ce, fin) - ini) / spanMs) * trackW;
+          doc.setFillColor(...C_EMERG); doc.rect(x0, emY, Math.max(x1 - x0, 0.8), emH, 'F');
+        });
+        cy += emH + 1.5;
+      }
+
+      // Nombre + hora de cada subactividad, debajo de la barra
+      if (subs.length) {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(5.3); doc.setTextColor(...C_MUTED);
+        const txt = subs.map((s) => `${s.nombre} (${fmtDateHour(s.inicio)}–${fmtDateHour(s.fin)})`).join('   ·   ');
+        const lineas = doc.splitTextToSize(txt, trackW);
+        doc.text(lineas, trackX, cy + 2.2);
+        cy += lineas.length * 2.9 + 2;
+        doc.setTextColor(0, 0, 0);
+      }
+      cy += 3.5;
+      doc.setDrawColor(...C_LINE); doc.line(marginX, cy - 1.8, pageW - marginX, cy - 1.8);
+    });
+    cy += 4;
+  }
+
   const cols = [
     { w: 22, label: 'OT' }, { w: 66, label: 'Actividad' }, { w: 22, label: 'Área' },
     { w: 34, label: 'Supervisor A/B' }, { w: 15, label: 'HH' }, { w: 15, label: 'Avance' }, { w: 0, label: 'Estado' },
