@@ -873,7 +873,7 @@ function renderGanttOverview() {
       const avanzandoReal = real > 0 && real < 0.999;
       const dimColor = ot.tipo === 'Emergente' ? 'var(--emergente)' : (behind ? 'var(--cancelada)' : 'var(--atiempo)');
 
-      const comps = (SEED_DATA.complementarias || []).filter((c) => c.otRelacionada === ot.otNum)
+      const comps = (SEED_DATA.complementarias || []).filter((c) => c.otRelacionada === ot.otNum && c.tag !== 'INST')
         .map((c) => ({ inicio: c.inicio, fin: c.fin, color: tagColor[c.tag] || '#999' }));
       const dimSeg = { inicio: ot.inicio, fin: ot.fin, color: dimColor };
       const allSegs = [...comps, dimSeg].sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
@@ -942,7 +942,7 @@ function renderGanttDetail(otNum) {
   document.getElementById('ganttBack').style.display = 'inline-block';
 
   const tagColor = { AND: '#9B59D9', ASEO: '#22B37E', INST: '#00B4D8' };
-  const comps = (SEED_DATA.complementarias || []).filter((c) => c.otRelacionada === otNum)
+  const comps = (SEED_DATA.complementarias || []).filter((c) => c.otRelacionada === otNum && c.tag !== 'INST')
     .map((c) => ({ inicio: c.inicio, fin: c.fin, color: tagColor[c.tag] || '#999', label: c.nombre }));
 
   const subs = (ot.subactividades || []).map((s) => {
@@ -3229,6 +3229,15 @@ document.addEventListener('DOMContentLoaded', () => {
         btnGen.disabled = false; btnGen.textContent = 'Informe general';
       });
     }
+    const btnTurno = document.getElementById('btnInformeTurno');
+    if (btnTurno) {
+      btnTurno.addEventListener('click', async () => {
+        btnTurno.disabled = true; btnTurno.textContent = 'Generando…';
+        try { await generateInformeTurnoPdf(); }
+        catch (e) { console.error(e); showToast('No se pudo generar el informe'); }
+        btnTurno.disabled = false; btnTurno.textContent = 'Informe por turno';
+      });
+    }
   }, 'botones-informes');
 });
 
@@ -3516,6 +3525,212 @@ function dibujarGraficoCurvaS(doc, data, chartX, chartY, chartW, chartH) {
 }
 
 // ---- Informe general (portada, curva S, resumen, actividades, componentes, emergentes, canceladas, conclusiones) ----
+// ---- Informe por turno: mismo formato visual que la Linea de tiempo del informe de
+//      actividades, pero filtrado a lo relevante AHORA MISMO — actividades con avance
+//      real cargado (en curso de verdad) o que segun el Gantt deberian estar en curso.
+//      Las que ya estan al 100% se muestran, pero siempre al final de la lista. ----
+async function generateInformeTurnoPdf() {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const pageW = 210, pageH = 297, marginX = 14;
+  let cy = 20, pageNum = 1;
+  const C_DARK = [26, 26, 46], C_MUTED = [107, 107, 117], C_LINE = [220, 220, 216];
+
+  function drawFooter() {
+    doc.setFontSize(7.5); doc.setTextColor(150, 150, 150);
+    doc.text('Generado automáticamente — ' + ((window.BRANDING && window.BRANDING.empresa) || 'DIMARZA'), marginX, pageH - 8);
+    doc.text('Página ' + pageNum, pageW - marginX, pageH - 8, { align: 'right' });
+    doc.setTextColor(0, 0, 0);
+  }
+  function newPage() { doc.addPage(); pageNum++; drawFooter(); cy = 18; }
+  function ensureSpace(h) { if (cy + h > pageH - 14) newPage(); }
+
+  const now = new Date();
+  const turnoTxt = SEED_DATA.turnoLabels[turnoActualIdx()];
+
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(...C_DARK);
+  doc.text('Informe por turno', marginX, cy);
+  cy += 6;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...C_MUTED);
+  doc.text(`${SEED_DATA.paradaNombre} · Turno actual: ${turnoTxt} · Generado: ${new Date().toLocaleString('es-CL')}`, marginX, cy);
+  doc.setTextColor(0, 0, 0);
+  cy += 10;
+
+  // Relevante ahora = tiene avance real cargado (0% < real < 100%) O el Gantt dice que
+  // deberia estar en curso en este momento. Las que ya llegaron a 100% quedan al final.
+  const candidatas = allOts().map((ot) => {
+    const ini = new Date(ot.inicio), fin = new Date(ot.fin);
+    const real = otProgressAt(ot, SEED_DATA.turnoLabels.length - 1);
+    const dentroVentana = now >= ini && now <= fin;
+    const enCursoReal = real > 0 && real < 0.999;
+    return { ot, real, dentroVentana, enCursoReal };
+  }).filter((x) => x.dentroVentana || x.enCursoReal);
+
+  candidatas.sort((a, b) => {
+    const aDone = a.real >= 0.999, bDone = b.real >= 0.999;
+    if (aDone !== bDone) return aDone ? 1 : -1;
+    return new Date(a.ot.inicio) - new Date(b.ot.inicio);
+  });
+  const ots = candidatas.map((c) => c.ot);
+  const flagsPorOt = {}; candidatas.forEach((c) => { flagsPorOt[c.ot.otNum] = c; });
+
+  if (ots.length === 0) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(...C_MUTED);
+    doc.text('No hay actividades en curso ni programadas para este turno en este momento.', marginX, cy);
+    doc.setTextColor(0, 0, 0);
+  }
+
+  // ---- Línea de tiempo (mismo dibujo que en el informe de actividades) ----
+  const C_ATIEMPO = [31, 169, 113], C_ATRASADO = [224, 65, 62], C_EMERG = [255, 179, 92];
+  const C_BANDA = [230, 241, 251], C_BANDB = [243, 243, 240];
+  function badgeMini(x, y, txt, bg, fg) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(5.2);
+    const w = doc.getTextWidth(txt) + 3;
+    doc.setFillColor(...bg); doc.roundedRect(x - w, y - 2.1, w, 2.9, 0.8, 0.8, 'F');
+    doc.setTextColor(...fg); doc.text(txt, x - w / 2, y - 0.2, { align: 'center' });
+    doc.setTextColor(0, 0, 0);
+    return w;
+  }
+  if (ots.length > 0) {
+    const range = paradaRange();
+    const trackX = marginX, trackW = pageW - marginX * 2;
+    const px = (d) => trackX + (xPct(d, range) / 100) * trackW;
+    const boundaries = SEED_DATA.turnos.map((t) => new Date(t));
+
+    let lx = marginX;
+    [['A tiempo', C_ATIEMPO], ['Atrasado', C_ATRASADO], ['Emergente', C_EMERG]].forEach(([label, col]) => {
+      doc.setFillColor(...col); doc.rect(lx, cy - 1.7, 2, 2, 'F');
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(5.4); doc.setTextColor(...C_MUTED);
+      doc.text(label, lx + 3, cy);
+      lx += doc.getTextWidth(label) + 9;
+    });
+    doc.setTextColor(0, 0, 0);
+    cy += 4;
+
+    function dibujarEjeCompartido() {
+      ensureSpace(12);
+      const dias = [];
+      let cur = new Date(range.start); cur.setHours(0, 0, 0, 0);
+      const meses = { 0: 'ene', 1: 'feb', 2: 'mar', 3: 'abr', 4: 'may', 5: 'jun', 6: 'jul', 7: 'ago', 8: 'sep', 9: 'oct', 10: 'nov', 11: 'dic' };
+      while (cur <= range.end) { dias.push(new Date(cur)); cur.setDate(cur.getDate() + 1); }
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(4.4); doc.setTextColor(...C_MUTED);
+      dias.forEach((d) => { doc.text(`${d.getDate()}-${meses[d.getMonth()]}`, px(d), cy); });
+      doc.setTextColor(0, 0, 0);
+      cy += 2.4;
+      const bandaY = cy, bandaH = 2.6;
+      for (let i = 0; i < boundaries.length - 1; i++) {
+        const s = boundaries[i], e = boundaries[i + 1];
+        if (e < range.start || s > range.end) continue;
+        const x0 = px(s < range.start ? range.start : s), x1 = px(e > range.end ? range.end : e);
+        const esDia = s.getHours() === 7;
+        doc.setFillColor(...(esDia ? C_BANDA : C_BANDB));
+        doc.rect(x0, bandaY, Math.max(x1 - x0, 0.2), bandaH, 'F');
+        if (x1 - x0 > 6) {
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(3.7);
+          doc.setTextColor(...(esDia ? [12, 68, 124] : [130, 130, 124]));
+          doc.text(esDia ? 'Turno A' : 'Turno B', (x0 + x1) / 2, bandaY + 1.8, { align: 'center' });
+        }
+      }
+      doc.setTextColor(0, 0, 0);
+      cy += bandaH + 2;
+    }
+    dibujarEjeCompartido();
+
+    ots.forEach((ot) => {
+      const ini = new Date(ot.inicio), fin = new Date(ot.fin);
+      const subs = (ot.subactividades || []).slice().sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
+      const emergs = (SEED_DATA.complementarias || []).filter((c) => c.otRelacionada === ot.otNum);
+      const alturaEstim = 13 + (subs.length ? 3 : 0) + (emergs.length ? 2.5 : 0);
+      if (cy + alturaEstim > pageH - 14) { newPage(); dibujarEjeCompartido(); }
+
+      const real = otProgressAt(ot, SEED_DATA.turnoLabels.length - 1);
+      const expected = expectedPctNow(ot, now);
+      const behind = now > ini && real < expected - 0.1 && real < 0.999;
+      const esEmergOt = ot.tipo === 'Emergente';
+      const colorOt = esEmergOt ? C_EMERG : (behind ? C_ATRASADO : C_ATIEMPO);
+      const f = flagsPorOt[ot.otNum];
+
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(6.8); doc.setTextColor(...C_DARK);
+      doc.text(`OT ${ot.otNum} — ${ot.descripcion}`, marginX, cy, { maxWidth: pageW - marginX * 2 });
+      cy += 3;
+
+      // Etiquetas de por que aparece: en curso real y/o segun el Gantt
+      let etx = marginX;
+      if (f && f.enCursoReal) {
+        doc.setFontSize(4.6); doc.setFillColor(234, 243, 222); doc.setTextColor(39, 80, 10);
+        const t = '🔧 En curso (real)'; const w = doc.getTextWidth(t) + 3;
+        doc.roundedRect(etx, cy - 1.9, w, 2.6, 0.8, 0.8, 'F'); doc.text(t, etx + 1.5, cy - 0.1);
+        etx += w + 1.5;
+      }
+      if (f && f.dentroVentana) {
+        doc.setFontSize(4.6); doc.setFillColor(230, 241, 251); doc.setTextColor(12, 68, 124);
+        const t = '📅 Según Gantt'; const w = doc.getTextWidth(t) + 3;
+        doc.roundedRect(etx, cy - 1.9, w, 2.6, 0.8, 0.8, 'F'); doc.text(t, etx + 1.5, cy - 0.1);
+      }
+      doc.setTextColor(0, 0, 0);
+      cy += 3.2;
+
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(5.2); doc.setTextColor(...C_MUTED);
+      doc.text(`${fmtDateHour(ot.inicio)} → ${fmtDateHour(ot.fin)}`, marginX, cy);
+      doc.setTextColor(0, 0, 0);
+      let bx = pageW - marginX;
+      bx -= badgeMini(bx, cy, `Real: ${Math.round(real * 100)}%`, real + 0.001 < expected ? [252, 235, 235] : [234, 243, 222], real + 0.001 < expected ? [121, 31, 31] : [39, 80, 10]);
+      bx -= 1.5;
+      bx -= badgeMini(bx, cy, `De acuerdo a Gantt: ${Math.round(expected * 100)}%`, C_BANDA, [12, 68, 124]);
+      cy += 2.4;
+
+      const barY = cy, barH = 3.2;
+      doc.setFillColor(237, 237, 234); doc.roundedRect(trackX, barY, trackW, barH, 0.6, 0.6, 'F');
+      const x0 = px(ini), x1 = px(fin);
+      doc.setFillColor(...colorOt);
+      doc.roundedRect(x0, barY, Math.max(x1 - x0, 0.8), barH, 0.6, 0.6, 'F');
+      subs.forEach((s, idx) => {
+        if (idx === 0) return;
+        const t = new Date(s.inicio);
+        if (t <= ini || t >= fin) return;
+        const x = px(t);
+        doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.6);
+        doc.line(x, barY, x, barY + barH);
+      });
+      if (now >= ini && now <= fin) {
+        const xNow = px(now);
+        doc.setDrawColor(26, 26, 26); doc.setLineWidth(0.5);
+        doc.line(xNow, barY - 1, xNow, barY + barH + 1);
+      }
+      cy += barH + 0.8;
+
+      if (emergs.length) {
+        const emY = cy, emH = 1.8;
+        emergs.forEach((c) => {
+          const cs = new Date(c.inicio), ce = new Date(c.fin);
+          if (ce < ini || cs > fin) return;
+          const ex0 = px(cs < ini ? ini : cs), ex1 = px(ce > fin ? fin : ce);
+          doc.setFillColor(...C_EMERG); doc.rect(ex0, emY, Math.max(ex1 - ex0, 0.8), emH, 'F');
+        });
+        cy += emH + 1;
+      }
+
+      if (subs.length) {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(4.4); doc.setTextColor(...C_MUTED);
+        const txt = subs.map((s) => {
+          const live = getSubLive(ot.otNum, s.nombre);
+          const avanceSub = Math.round((carryForward(live.avance, SEED_DATA.turnoLabels.length - 1) || 0) * 100);
+          return `${s.nombre} (${fmtDateHour(s.inicio)}–${fmtDateHour(s.fin)}) · ${avanceSub}%`;
+        }).join('   ·   ');
+        const lineas = doc.splitTextToSize(txt, trackW);
+        doc.text(lineas, trackX, cy + 1.8);
+        cy += lineas.length * 2.3 + 1.4;
+        doc.setTextColor(0, 0, 0);
+      }
+      cy += 2.2;
+      doc.setDrawColor(...C_LINE); doc.line(marginX, cy - 1.8, pageW - marginX, cy - 1.8);
+    });
+  }
+
+  drawFooter();
+  doc.save(`Informe_Por_Turno_${new Date().toISOString().slice(0, 10)}_${new Date().toTimeString().slice(0, 5).replace(':', '')}.pdf`);
+}
+
 async function generateInformeGeneralPdf() {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });

@@ -126,20 +126,25 @@
     body:not(.en-inicio) nav.tabs{ display:none; }
     body:not(.en-inicio) #view-avance{ display:contents; }
     body:not(.en-inicio) #view-curva{
-      display:block; grid-column:3; grid-row:1;
+      display:block; grid-column:3; grid-row:2;
       max-height:calc(100vh - 200px); overflow-y:auto; padding:0;
     }
-    body:not(.en-inicio) .view-toggle,
-    body:not(.en-inicio) #ganttCard{ display:none; }
+    body:not(.en-inicio) .view-toggle{ display:none; }
+    /* En escritorio faltaba del todo la Linea de tiempo — ahora ocupa una fila propia,
+       arriba de las 3 columnas (lista / detalle / curva), con scroll interno si es larga. */
+    body:not(.en-inicio) #ganttCard{
+      display:block !important; grid-column:1/4; grid-row:1;
+      max-height:320px; overflow-y:auto; margin-bottom:2px;
+    }
     body:not(.en-inicio) #listaWrap{
-      grid-column:1; grid-row:1 / span 2; max-height:calc(100vh - 200px); overflow-y:auto;
+      grid-column:1; grid-row:2; max-height:calc(100vh - 200px); overflow-y:auto;
     }
 
     /* El panel de detalle deja de ser un overlay flotante y pasa a ser una columna mas */
     body:not(.en-inicio) #sheetBackdrop{
       position:static; inset:auto; background:none; z-index:auto;
       display:block; align-items:initial;
-      grid-column:2; grid-row:1;
+      grid-column:2; grid-row:2;
       max-height:calc(100vh - 200px); overflow-y:auto;
     }
     body:not(.en-inicio) #sheetBackdrop .sheet{
@@ -240,18 +245,18 @@
     input[type=range]::-webkit-slider-thumb{ width:32px; height:32px; margin-top:-12px; }
 
     /* Encabezado "CORREA CV201" etc. en la Linea de tiempo — mas grande y legible */
-    .gantt-area-header{ font-size:14px; letter-spacing:.03em; margin:16px 2px 7px; border-left-width:3px; padding-left:5px; }
+    .gantt-area-header{ font-size:12px; letter-spacing:.02em; margin:12px 2px 5px; border-left-width:3px; padding-left:5px; }
     .wp-tag{ font-size:12px; padding:4px 8px; }
-    .turno-actual-badge{ font-size:14px; padding:10px 16px; }
+    .turno-actual-badge{ font-size:10.5px; padding:8px 12px; border-radius:12px; line-height:1.5; }
     .eyebrow{ font-size:13px; }
 
     /* El "chrome" de la tarjeta Linea de tiempo (titulo, leyenda de colores, eje de dias,
        A/B de turno) se habia quedado chico mientras agrandaba solo las filas — ahora todo junto */
-    .gantt-header h3{ font-size:15px; }
-    .gantt-legend{ font-size:10.5px; gap:8px 12px; }
+    .gantt-header h3{ font-size:13px; }
+    .gantt-legend{ font-size:9px; gap:6px 10px; }
     .gantt-legend i{ width:8px; height:8px; }
-    .gantt-axis{ font-size:9px; height:14px; }
-    .turno-band-label{ font-size:8px; top:2px; opacity:.7; }
+    .gantt-axis{ font-size:8px; height:12px; }
+    .turno-band-label{ font-size:7px; top:2px; opacity:.7; }
 
     /* Boton "Informe de actividades por supervisor" + flecha + listado: tamanos de celular reales */
     .btn-informe-sup{ font-size:11.5px; padding:9px 10px; text-align:left; }
@@ -259,16 +264,16 @@
     .supervisor-dropdown button{ font-size:14.5px; padding:13px 14px; }
 
     /* Tarjetas de la Linea de tiempo y botones principales, mas grandes */
-    .fila-g, .gantt-row-full{ padding:10px 4px 10px 10px !important; }
-    .gantt-row-full .gantt-row-name{ font-size:14.5px !important; line-height:1.35 !important; font-weight:700 !important; }
-    .gantt-row-full .gantt-row-dates{ font-size:11.5px !important; line-height:1.5 !important; }
-    .gantt-sup-tag{ font-size:11px; }
+    .fila-g, .gantt-row-full{ padding:7px 4px 7px 8px !important; }
+    .gantt-row-full .gantt-row-name{ font-size:12.5px !important; line-height:1.3 !important; font-weight:700 !important; }
+    .gantt-row-full .gantt-row-dates{ font-size:10px !important; line-height:1.45 !important; }
+    .gantt-sup-tag{ font-size:9.5px; }
     .gantt-sup-dot{ width:6px; height:6px; margin-right:4px; }
     .gantt-sup-tag.gantt-sup-activo{ padding:2px 7px; }
-    .gantt-badge{ font-size:10px; padding:3px 8px; }
-    .gantt-now-line::after{ font-size:9px; padding:2px 6px; bottom:-18px; }
-    .gantt-row-full{ margin-bottom:18px; }
-    .gantt-row-full .gantt-track{ height:14px; }
+    .gantt-badge{ font-size:9px; padding:2px 7px; }
+    .gantt-now-line::after{ font-size:8px; padding:1.5px 5px; bottom:-16px; }
+    .gantt-row-full{ margin-bottom:13px; }
+    .gantt-row-full .gantt-track{ height:11px; }
     .btn-add-emerg{ font-size:15px; padding:14px; min-height:50px; }
     .btn-informe{ font-size:12px; padding:9px 10px; min-height:40px; }
     .wp-nom{ font-size:19px; }
@@ -365,6 +370,7 @@
         <div class="supervisor-dropdown" id="supervisorDropdown" role="listbox"></div>
       </div>
       <button id="btnInformeGeneral" class="btn-informe principal">Informe general</button>
+      <button id="btnInformeTurno" class="btn-informe">Informe por turno</button>
     </div>
     <p class="eyebrow"><span class="conn-dot" id="connDot"></span><span id="connTxt">Conectando…</span></p>
     <div class="turno-actual-badge" id="turnoActualBadge"></div>
@@ -386,7 +392,6 @@
             <span><i style="background:var(--atiempo)"></i>Cuadrilla (a tiempo)</span>
             <span><i style="background:var(--cancelada)"></i>Cuadrilla (atrasado)</span>
             <span><i style="background:var(--emergente)"></i>Emergente</span>
-            <span><i style="background:var(--inst)"></i>Instrumentación</span>
           </div>
           <div id="ganttAxisSticky"></div>
         </div>
