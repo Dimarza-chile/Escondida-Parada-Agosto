@@ -18,6 +18,9 @@
     /* Gris claro (antes era gris oscuro/carbon) para que las tarjetas combinen con el fondo blanco */
     --navy: #EDEDEA; --navy-soft: #F5F5F2;
     --ink: #1A1A1A; --ink-muted: #6A6A65; --ink-dim: #9A9A95;
+    /* Verde para "Cuadrilla (a tiempo)" en la Linea de tiempo — antes iba en naranja (el mismo
+       color de marca), lo que confundia con el resto de la interfaz. Rojo = atrasado se mantiene. */
+    --atiempo: #1FA971;
   }
   body, .app{ background: var(--navy-deep); }
   .tabs{ background: #fff; border-top: 1px solid var(--line); }
@@ -380,11 +383,9 @@
             <button id="ganttBack" style="display:none;">← Volver</button>
           </div>
           <div class="gantt-legend">
-            <span><i style="background:var(--brand)"></i>Cuadrilla (a tiempo)</span>
+            <span><i style="background:var(--atiempo)"></i>Cuadrilla (a tiempo)</span>
             <span><i style="background:var(--cancelada)"></i>Cuadrilla (atrasado)</span>
             <span><i style="background:var(--emergente)"></i>Emergente</span>
-            <span><i style="background:var(--and)"></i>Andamios</span>
-            <span><i style="background:var(--aseo)"></i>Aseo</span>
             <span><i style="background:var(--inst)"></i>Instrumentación</span>
           </div>
           <div id="ganttAxisSticky"></div>

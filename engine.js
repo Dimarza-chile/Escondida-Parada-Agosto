@@ -871,7 +871,7 @@ function renderGanttOverview() {
       const dentroVentana = showNow && now >= new Date(ot.inicio) && now <= new Date(ot.fin);
       const behind = showNow && now > new Date(ot.inicio) && real < expected - 0.1 && real < 0.999;
       const avanzandoReal = real > 0 && real < 0.999;
-      const dimColor = ot.tipo === 'Emergente' ? 'var(--emergente)' : (behind ? 'var(--cancelada)' : 'var(--brand)');
+      const dimColor = ot.tipo === 'Emergente' ? 'var(--emergente)' : (behind ? 'var(--cancelada)' : 'var(--atiempo)');
 
       const comps = (SEED_DATA.complementarias || []).filter((c) => c.otRelacionada === ot.otNum)
         .map((c) => ({ inicio: c.inicio, fin: c.fin, color: tagColor[c.tag] || '#999' }));
@@ -2522,7 +2522,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const now = turnoActualIdx();
     const nowIcon = SEED_DATA.turnoLabels[now].includes('07:00') ? ICON_SUN : ICON_MOON;
-    document.getElementById('turnoActualBadge').innerHTML = `${nowIcon}<span>Turno actual: ${SEED_DATA.turnoLabels[now]}</span>`;
+    const finTurnoTxt = SEED_DATA.turnos[now + 1] ? fmtDateHour(SEED_DATA.turnos[now + 1]) : SEED_DATA.turnoLabels[now];
+    document.getElementById('turnoActualBadge').innerHTML = `${nowIcon}<span>Turno actual: ${SEED_DATA.turnoLabels[now]} → ${finTurnoTxt}</span>`;
 
     initTabs();
     renderAll();
