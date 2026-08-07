@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Curva S — Control de Parada</title>
+<meta name="theme-color" content="#0F2438">
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="./styles.css">
+<style>
+  /* Colores propios de esta empresa/cliente - unico bloque que cambia por cliente */
+  :root{
+    --brand: #FF7A1E; --brand-soft: rgba(255,122,30,.18);
+    --navy-deep: #FFFFFF; --line: #E4E4E8;
+    /* Gris claro (antes era gris oscuro/carbon) para que las tarjetas combinen con el fondo blanco */
+    --navy: #EDEDEA; --navy-soft: #F5F5F2;
+    --ink: #1A1A1A; --ink-muted: #6A6A65; --ink-dim: #9A9A95;
+  }
+  body, .app{ background: var(--navy-deep); }
+  .tabs{ background: #fff; border-top: 1px solid var(--line); }
+
+  /* Los overlays sutiles del Gantt (track, borde de barra plan, lineas de turno) estaban
+     pensados en blanco translucido para un fondo oscuro. Con el gris claro de este cliente
+     se invierten a negro translucido para que sigan siendo visibles. */
+  .gantt-track{ background: rgba(0,0,0,.07); }
+  .gantt-bar-plan{ border-color: rgba(0,0,0,.18); }
+  .turno-gridline{ background: rgba(0,0,0,.09); }
+  .comp-row{ background: rgba(0,0,0,.035); }
+  .gantt-turno-row span.night{ background: rgba(0,0,0,.055); }
+
+  /* Elementos que quedan directo sobre el fondo blanco de pagina (no dentro de tarjeta) necesitan texto oscuro */
+  header.top{ background: #fff; }
+  .logos-row{
+    background:#141414; margin:-14px -18px 12px; padding:14px 18px 12px;
+  }
+  header.top h1{ color:#1A1A2E; }
+  header.top .sub{ color:#6B6B75; }
+  header.top .eyebrow{ color:#6B6B75; }
+  .wp-nom{ color:#1A1A2E; }
+  .wp-rango{ color:#6B6B75; }
+  .dmz-texto{ color:#fff; }
+
+  .informes-row{ display:flex; gap:8px; margin-top:10px; }
+  .btn-informe{
+    padding:8px 13px; border-radius:8px; font-size:11.5px; font-weight:700; cursor:pointer;
+    font-family: var(--sans); background:#fff; border:1.5px solid #C8C8C4; color:#1A1A2E;
+  }
+  .btn-informe.principal{ background: var(--brand); border-color: var(--brand); color:#fff; }
+
+  /* Boton "Informe de actividades por supervisor" + flecha desplegable con el listado */
+  .btn-informe-sup-wrap{ position:relative; display:flex; }
+  .btn-informe-sup{ flex:1; border-radius:8px 0 0 8px; text-align:left; white-space:normal; line-height:1.25; }
+  .btn-informe-arrow{
+    padding:8px 12px; border-radius:0 8px 8px 0; font-size:13px; font-weight:700; cursor:pointer;
+    font-family: var(--sans); background:#fff; border:1.5px solid #C8C8C4; border-left:none; color:#1A1A2E;
+  }
+  .supervisor-dropdown{
+    display:none; position:absolute; top:calc(100% + 6px); left:0; min-width:230px; max-height:300px;
+    overflow-y:auto; background:#fff; border:1px solid #C8C8C4; border-radius:10px;
+    box-shadow:0 8px 22px rgba(0,0,0,.18); z-index:40;
+  }
+  .supervisor-dropdown.open{ display:block; }
+  .supervisor-dropdown button{
+    display:block; width:100%; text-align:left; padding:11px 14px; border:none; background:none; cursor:pointer;
+    font-family: var(--sans); font-size:13.5px; color:#1A1A2E; border-bottom:1px solid #EEEEEA;
+  }
+  .supervisor-dropdown button:last-child{ border-bottom:none; }
+  .supervisor-dropdown button.activo{ background: var(--brand-soft); color: var(--brand); font-weight:700; }
+
+  @media (min-width:1024px){
+    header.top{ position:relative; }
+    .informes-row{ position:absolute; top:14px; right:18px; margin-top:0; }
+  }
+  .area-header{ color:#8A8A95; }
+  .area-header::after{ background:#DADAE0; }
+  .gantt-area-header{ color: var(--brand); }
+  .view-toggle{ background:#F0F0F3; }
+  .view-toggle button{ color:#6B6B75; }
+  .view-toggle button.active{ background:#fff; color:var(--brand); }
+
+  .logos-row{ display:flex; align-items:center; gap:14px; margin-bottom:10px; }
+  .logos-row img{ height:34px; }
+  .dmz-texto{ font-size:13px; font-weight:700; color:#fff; letter-spacing:-.01em; }
+
+  /* Foto real de Escondida como fondo del hero, con capa oscura para legibilidad */
+  .hero{
+    background:
+      linear-gradient(180deg, rgba(15,10,8,.55), rgba(15,10,8,.85)),
+      url('./assets/hero-bg.jpg') center 65%/cover no-repeat !important;
+  }
+  .logos-row .divider{ width:1px; height:24px; background:#DADAE0; }
+
+  /* Línea WORK PACK: nombre del work pack + rango de fechas siempre visible */
+  .wp-linea{ display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; margin-bottom:4px; }
+  .wp-tag{
+    font-size:9px; font-weight:800; letter-spacing:.13em; color:var(--brand);
+    font-family:var(--mono); border:1px solid var(--brand); padding:2px 6px; border-radius:4px;
+  }
+  .wp-nom{ font-size:17px; font-weight:700; color:#1A1A2E; letter-spacing:-.01em; }
+  .wp-rango{ font-size:11px; color:#6B6B75; font-family:var(--mono); }
+
+  /* Por defecto (celular) el sheet sigue siendo un modal flotante: el mensaje
+     de "elige una actividad" solo tiene sentido en el layout de 3 paneles */
+  #sheetEmptyState{ display:none; }
+
+  /* ---------- Layout de 3 paneles en pantallas grandes (escritorio/tablet) ---------- */
+  @media (min-width: 1024px){
+    .app{ max-width:1400px; margin:0 auto; }
+
+    /* En la pantalla de inicio el hero ocupa todo: nada de grid de 3 paneles */
+    body.en-inicio main{ display:block; padding:0 20px; }
+    body.en-inicio #view-inicio{ display:block; }
+
+    /* Layout de 3 paneles: solo cuando NO estamos en el inicio */
+    body:not(.en-inicio) main{
+      display:grid; grid-template-columns: 300px 1fr 360px; gap:16px;
+      align-items:start; padding:0 20px;
+    }
+    body:not(.en-inicio) nav.tabs{ display:none; }
+    body:not(.en-inicio) #view-avance{ display:contents; }
+    body:not(.en-inicio) #view-curva{
+      display:block; grid-column:3; grid-row:1;
+      max-height:calc(100vh - 200px); overflow-y:auto; padding:0;
+    }
+    body:not(.en-inicio) .view-toggle,
+    body:not(.en-inicio) #ganttCard{ display:none; }
+    body:not(.en-inicio) #listaWrap{
+      grid-column:1; grid-row:1 / span 2; max-height:calc(100vh - 200px); overflow-y:auto;
+    }
+
+    /* El panel de detalle deja de ser un overlay flotante y pasa a ser una columna mas */
+    body:not(.en-inicio) #sheetBackdrop{
+      position:static; inset:auto; background:none; z-index:auto;
+      display:block; align-items:initial;
+      grid-column:2; grid-row:1;
+      max-height:calc(100vh - 200px); overflow-y:auto;
+    }
+    body:not(.en-inicio) #sheetBackdrop .sheet{
+      max-width:none; border-radius:16px; max-height:none; overflow:visible;
+      border:1px solid var(--line); padding:18px 20px;
+    }
+    body:not(.en-inicio) #sheetBackdrop .handle{ display:none; }
+    /* Mientras no haya nada elegido, se muestra el mensaje y se esconde el formulario */
+    body:not(.en-inicio) #sheetBackdrop:not(.tiene-seleccion) .sheet{ display:none; }
+    body:not(.en-inicio) #sheetBackdrop:not(.tiene-seleccion) #sheetEmptyState{ display:block; }
+    body:not(.en-inicio) #sheetBackdrop.tiene-seleccion #sheetEmptyState{ display:none; }
+
+    /* Panel central y derecho: fondo claro (paleta de referencia BHP).
+       El izquierdo (lista) se mantiene oscuro. Redefinir las variables
+       aqui hace que TODO lo de adentro (tarjetas, texto, bordes) cambie
+       de tono automaticamente, sin tocar cada componente uno por uno. */
+    body:not(.en-inicio) #sheetBackdrop,
+    body:not(.en-inicio) #polinesSheetBackdrop,
+    body:not(.en-inicio) #view-curva{
+      --navy: #FFFFFF; --navy-soft: #F4F4F2; --navy-deep: #F0F0EE;
+      --ink: #1A1A1A; --ink-muted: #6A6A65; --ink-dim: #9A9A95;
+      --line: #E2E2DD;
+      background: #F0F0EE; border-radius:14px; color: var(--ink);
+    }
+    body:not(.en-inicio) #sheetBackdrop .sheet,
+    body:not(.en-inicio) #polinesSheetBackdrop .sheet{ background:#F0F0EE; border-color:#E2E2DD; }
+    /* Tarjetas clave con acento de color arriba, como en BHP */
+    body:not(.en-inicio) .gantt-act-block,
+    body:not(.en-inicio) .componentes-block,
+    body:not(.en-inicio) .kpi-card,
+    body:not(.en-inicio) .gr,
+    body:not(.en-inicio) .protocolo-panel{
+      background:#fff; border:1px solid #E2E2DD; border-top:3px solid var(--brand);
+      box-shadow:0 1px 2px rgba(0,0,0,.04);
+    }
+
+    /* El panel de polines ocupa la misma columna central */
+    body:not(.en-inicio) #polinesSheetBackdrop{
+      position:static; inset:auto; background:none; z-index:auto;
+      display:none; align-items:initial;
+      grid-column:2; grid-row:1;
+      max-height:calc(100vh - 200px); overflow-y:auto;
+    }
+    body:not(.en-inicio) #polinesSheetBackdrop.open{ display:block; }
+    body:not(.en-inicio) #polinesSheetBackdrop .sheet{
+      max-width:none; border-radius:16px; max-height:none; overflow:visible;
+      border:1px solid var(--line); padding:18px 20px;
+    }
+    body:not(.en-inicio) #polinesSheetBackdrop .handle{ display:none; }
+    /* Si polines esta abierto, el panel de detalle normal se esconde */
+    body.polines-abierto:not(.en-inicio) #sheetBackdrop{ display:none; }
+  }
+
+  /* ---------- Celular: una sola pantalla a la vez, ancho completo ---------- */
+  @media (max-width: 1023px){
+    /* Textos del panel de detalle: MUCHO mas grandes en celular, legibles de verdad */
+    #sheetBackdrop .sheet h2, #polinesSheetBackdrop .sheet h2{ font-size:25px; line-height:1.3; padding-right:110px; }
+    #sheetBackdrop .sheet .meta, #polinesSheetBackdrop .sheet .meta{ font-size:16.5px; line-height:1.45; }
+    .rotulo-mini{ font-size:14.5px; letter-spacing:.03em; }
+    .gantt-act-fechas, .gantt-act-msg{ font-size:16px; line-height:1.45; }
+    .ot-status-row label, .turno-select-row-label{ font-size:16.5px; display:block; margin-bottom:7px; }
+    .supervisor-input-panel{ font-size:18px; padding:15px; min-height:52px; }
+    .sub-row{ padding:16px 14px; min-height:48px; }
+    .sub-row .sub-name{ font-size:17.5px; line-height:1.4; }
+    .sub-row .sub-meta{ font-size:15px; }
+    .sub-row .sub-pct{ font-size:18px; font-weight:700; }
+    .polin-titulo{ font-size:17px; }
+    .polin-posicion-tag{ font-size:13px; padding:2px 8px; }
+    .polin-desc{ font-size:15.5px; line-height:1.45; }
+    .polin-comentario{ font-size:15.5px; padding:12px; }
+    .polin-row{ padding:16px 14px; }
+    .polin-foto-btn{ font-size:14.5px; padding:12px 6px; }
+    .polin-meta{ font-size:13px; }
+    .polines-group-header{ font-size:13.5px; letter-spacing:.05em; margin:20px 0 8px; }
+    .polin-subestacion-header{ font-size:13px; margin:14px 0 3px 8px; }
+    .polines-resumen{ font-size:16px; padding:13px 14px; }
+    .criticidad-legend{ gap:10px; margin:14px 0 6px; }
+    .crit-tag{ font-size:13px; padding:5px 11px; border-radius:8px; }
+    #btnAddPolinEmergente{ font-size:15px; padding:14px; min-height:50px; }
+    .componentes-block-header span{ font-size:17px; font-weight:700; }
+    .componentes-block-header button{ font-size:15px; padding:11px 16px; }
+    .componentes-empty{ font-size:14.5px; padding:16px 0; }
+    .foto-slot-btn{ font-size:14.5px; padding:12px 6px; min-height:46px; }
+    .foto-slot-preview{ height:110px; }
+    #turnoOverride{ font-size:17px; padding:15px; min-height:52px; }
+    .kpi-card .label{ font-size:12.5px; }
+    .kpi-card .value{ font-size:28px; }
+    #pctDisplay, .pct-display{ font-size:36px !important; }
+    .quick-pcts button{ font-size:16px; padding:15px 4px; font-weight:700; min-height:50px; }
+    .sub-editor-inline{ padding:18px; }
+    .pct-display-inline{ font-size:38px; }
+    .quick-pcts-inline button{ font-size:16px; padding:15px 4px; font-weight:700; min-height:50px; }
+    .turno-select-inline{ font-size:17px; padding:14px; min-height:50px; }
+    .gantt-act-block .gantt-axis, .gantt-act-block .gantt-turno-row{ font-size:11px; }
+    input[type=range]{ height:44px; }
+    input[type=range]::-webkit-slider-thumb{ width:32px; height:32px; margin-top:-12px; }
+
+    /* Encabezado "CORREA CV201" etc. en la Linea de tiempo — mas grande y legible */
+    .gantt-area-header{ font-size:21px; letter-spacing:.04em; margin:28px 2px 12px; border-left-width:5px; padding-left:7px; }
+    .wp-tag{ font-size:12px; padding:4px 8px; }
+    .turno-actual-badge{ font-size:14px; padding:10px 16px; }
+    .eyebrow{ font-size:13px; }
+
+    /* El "chrome" de la tarjeta Linea de tiempo (titulo, leyenda de colores, eje de dias,
+       A/B de turno) se habia quedado chico mientras agrandaba solo las filas — ahora todo junto */
+    .gantt-header h3{ font-size:22px; }
+    .gantt-legend{ font-size:14.5px; gap:11px 16px; }
+    .gantt-legend i{ width:11px; height:11px; }
+    .gantt-axis{ font-size:13px; height:17px; }
+    .turno-band-label{ font-size:12px; top:3px; opacity:.8; }
+
+    /* Boton "Informe de actividades por supervisor" + flecha + listado: tamanos de celular reales */
+    .btn-informe-sup{ font-size:14px; padding:13px 14px; text-align:left; }
+    .btn-informe-arrow{ font-size:19px; padding:13px 16px; }
+    .supervisor-dropdown button{ font-size:16.5px; padding:15px 16px; }
+
+    /* Tarjetas de la Linea de tiempo y botones principales, mas grandes */
+    .fila-g, .gantt-row-full{ padding:16px 4px 16px 14px !important; }
+    .gantt-row-full .gantt-row-name{ font-size:21px !important; line-height:1.4 !important; font-weight:700 !important; }
+    .gantt-row-full .gantt-row-dates{ font-size:17px !important; line-height:1.9 !important; }
+    .gantt-sup-tag{ font-size:16px; }
+    .gantt-sup-dot{ width:9px; height:9px; margin-right:6px; }
+    .gantt-sup-tag.gantt-sup-activo{ padding:4px 11px; }
+    .gantt-badge{ font-size:14.5px; padding:5px 12px; }
+    .gantt-now-line::after{ font-size:12px; padding:3px 8px; bottom:-24px; }
+    .gantt-row-full{ margin-bottom:32px; }
+    .gantt-row-full .gantt-track{ height:20px; }
+    .btn-add-emerg{ font-size:15px; padding:14px; min-height:50px; }
+    .btn-informe{ font-size:13px; padding:12px 14px; min-height:46px; }
+    .wp-nom{ font-size:19px; }
+    .wp-rango{ font-size:13px; }
+
+    nav.tabs{ display:none; }
+    .view-toggle{ display:none; }
+    .informes-row{ flex-wrap:wrap; }
+    .btn-informe{ flex:1; min-width:130px; text-align:center; }
+    .btn-informe-sup-wrap{ flex:1; min-width:220px; }
+
+    /* Estado por defecto: Linea de tiempo, ancho completo */
+    #ganttCard{ display:block !important; }
+    #listaWrap{ display:none; }
+
+    /* Estado "actividad elegida": el detalle ocupa TODO el ancho,
+       sin panel izquierdo comprimido — una pantalla, una cosa a la vez */
+    body.mobile-detalle-activo #ganttCard{ display:none !important; }
+    body.mobile-detalle-activo #listaWrap{ display:none !important; }
+
+    body.mobile-detalle-activo #sheetBackdrop,
+    body.mobile-detalle-activo #polinesSheetBackdrop{
+      position:static; inset:auto; background:none; z-index:auto; display:block;
+      padding:0 16px;
+    }
+    body.mobile-detalle-activo #sheetBackdrop .sheet,
+    body.mobile-detalle-activo #polinesSheetBackdrop .sheet{
+      max-width:none; border-radius:14px; max-height:none; overflow:visible; position:relative;
+    }
+    body.mobile-detalle-activo #sheetBackdrop .handle,
+    body.mobile-detalle-activo #polinesSheetBackdrop .handle{ display:none; }
+    body.mobile-detalle-activo:not(.polines-abierto) #polinesSheetBackdrop{ display:none; }
+    /* BUG corregido: faltaba esconder el panel normal cuando el de polines esta activo —
+       antes quedaban los dos paneles visibles a la vez al ir de una actividad normal a una de polines */
+    body.mobile-detalle-activo.polines-abierto #sheetBackdrop{ display:none; }
+    body:not(.mobile-detalle-activo) #sheetBackdrop:not(.open),
+    body:not(.mobile-detalle-activo) #polinesSheetBackdrop:not(.open){ display:none; }
+
+    #btnVolverTimeline{
+      display:none; margin:10px 16px; width:calc(100% - 32px); text-align:left;
+      background: var(--brand); border:none; color:#fff;
+      font-size:16px; font-weight:700; padding:14px 16px; border-radius:12px; cursor:pointer;
+      box-shadow:0 2px 8px rgba(255,122,30,.35);
+    }
+    #btnVolverTimeline .flecha{ color:#fff; font-weight:700; margin-right:8px; font-size:19px; }
+    #btnVolverTimeline .ot-actual{ display:block; font-size:13px; color:rgba(255,255,255,.85); margin-top:3px; font-family: var(--mono); }
+    body.mobile-detalle-activo #btnVolverTimeline{ display:block; }
+
+    /* Boton para ver Curva S desde dentro del panel de detalle — etiqueta con
+       texto (no solo icono) y tamano grande, al nivel de la Linea de tiempo */
+    #btnVerCurvaMovil, #btnVerCurvaMovilPolines{
+      display:none; position:absolute; top:14px; right:14px; z-index:5;
+      background: var(--brand); border:none; color:#fff;
+      font-size:16px; font-weight:700; line-height:1; white-space:nowrap;
+      padding:13px 18px; border-radius:12px; cursor:pointer;
+      box-shadow:0 2px 8px rgba(255,122,30,.35);
+    }
+    body.mobile-detalle-activo #btnVerCurvaMovil,
+    body.mobile-detalle-activo #btnVerCurvaMovilPolines{ display:block; }
+
+    #btnVolverDetalleMovil{
+      display:none; margin:14px 16px; width:calc(100% - 32px); text-align:left;
+      background: var(--brand); border:none;
+      color:#fff; font-size:16px; font-weight:700; padding:14px 16px;
+      border-radius:12px; cursor:pointer; box-shadow:0 2px 8px rgba(255,122,30,.35);
+    }
+    body.viendo-curva-desde-detalle #btnVolverDetalleMovil{ display:block; }
+    /* Mientras se ve Curva S desde el detalle, esconder Avance por completo */
+    body.viendo-curva-desde-detalle #ganttCard,
+    body.viendo-curva-desde-detalle #listaWrap,
+    body.viendo-curva-desde-detalle #sheetBackdrop,
+    body.viendo-curva-desde-detalle #polinesSheetBackdrop{ display:none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="top">
+    <div class="logos-row">
+      <img src="./assets/bhp-logo.png" alt="BHP Escondida">
+      <div class="divider"></div>
+      <span class="dmz-texto">Dimarza Chile SPA</span>
+    </div>
+    <div class="wp-linea">
+      <span class="wp-tag">WORK PACK</span>
+      <span class="wp-nom" id="paradaTitle">Cargando…</span>
+      <span class="wp-rango" id="paradaSub"></span>
+    </div>
+    <div class="informes-row">
+      <div class="btn-informe-sup-wrap" id="btnInformeActividadesWrap">
+        <button id="btnInformeActividades" class="btn-informe btn-informe-sup">Informe de actividades por supervisor</button>
+        <button id="btnSupervisorArrow" class="btn-informe-arrow" type="button" title="Elegir supervisor" aria-haspopup="listbox" aria-expanded="false">▾</button>
+        <div class="supervisor-dropdown" id="supervisorDropdown" role="listbox"></div>
+      </div>
+      <button id="btnInformeGeneral" class="btn-informe principal">Informe general</button>
+    </div>
+    <p class="eyebrow"><span class="conn-dot" id="connDot"></span><span id="connTxt">Conectando…</span></p>
+    <div class="turno-actual-badge" id="turnoActualBadge"></div>
+  </header>
+
+  <main>
+    <div class="view active" id="view-avance">
+      <div class="view-toggle">
+        <button class="active" data-avview="lista">📋 Lista</button>
+        <button data-avview="gantt">📊 Línea de tiempo</button>
+      </div>
+      <div class="gantt-card" id="ganttCard" style="display:none;">
+        <div class="gantt-sticky-header" id="ganttStickyHeader">
+          <div class="gantt-header">
+            <h3 id="ganttTitle">Línea de tiempo — Work Pack</h3>
+            <button id="ganttBack" style="display:none;">← Volver</button>
+          </div>
+          <div class="gantt-legend">
+            <span><i style="background:var(--brand)"></i>Cuadrilla (a tiempo)</span>
+            <span><i style="background:var(--cancelada)"></i>Cuadrilla (atrasado)</span>
+            <span><i style="background:var(--emergente)"></i>Emergente</span>
+            <span><i style="background:var(--and)"></i>Andamios</span>
+            <span><i style="background:var(--aseo)"></i>Aseo</span>
+            <span><i style="background:var(--inst)"></i>Instrumentación</span>
+          </div>
+          <div id="ganttAxisSticky"></div>
+        </div>
+        <div class="gantt-scroll-body">
+          <div id="ganttWrap"></div>
+        </div>
+      </div>
+      <button id="btnVolverTimeline"><span class="flecha">←</span>Línea de tiempo<span class="ot-actual" id="otActualEnBoton"></span></button>
+      <div id="listaWrap">
+        <div class="add-emerg-row">
+          <button id="btnAddEmerg" class="btn-add-emerg">+ Añadir actividad emergente</button>
+        </div>
+        <div id="otList"></div>
+      </div>
+    </div>
+
+    <div class="view" id="view-curva">
+      <button id="btnVolverDetalleMovil">← Volver al detalle</button>
+      <div class="kpi-strip">
+        <div class="kpi-card">
+          <div class="label">Crecim. Alcance</div>
+          <div class="value" id="kpiCrecimiento">—</div>
+        </div>
+        <div class="kpi-card">
+          <div class="label">Var. Neta</div>
+          <div class="value" id="kpiNeto">—</div>
+        </div>
+        <div class="kpi-card">
+          <div class="label">Cancelado</div>
+          <div class="value" id="kpiCancelado">—</div>
+        </div>
+      </div>
+
+      <div class="area-header">Avance de actividades</div>
+      <div class="kpi-strip">
+        <div class="kpi-card">
+          <div class="label">Completadas</div>
+          <div class="value" id="kpiCompletadas" style="font-size:15px;">—</div>
+        </div>
+        <div class="kpi-card">
+          <div class="label">En curso</div>
+          <div class="value" id="kpiEnCurso" style="font-size:15px;">—</div>
+        </div>
+        <div class="kpi-card">
+          <div class="label">No iniciadas</div>
+          <div class="value" id="kpiNoIniciadas" style="font-size:15px;">—</div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-card-top">
+          <h3>Curva S</h3>
+          <button id="btnDownloadPdf" class="btn-pdf">⬇ PDF</button>
+        </div>
+        <p class="legend-hint">Toca cada línea para mostrar u ocultar</p>
+        <div class="legend">
+          <span data-curve="plan"><i style="background:#FF7A1E"></i>Plan</span>
+          <span data-curve="real"><i style="background:#F0403E"></i>Real</span>
+          <span data-curve="alcance"><i style="background:#FF7A1E;opacity:.5"></i>Alcance Emergentes</span>
+          <span data-curve="total"><i style="background:#FF9F45"></i>Real Total</span>
+        </div>
+        <div id="chartSvgWrap"></div>
+        <p style="font-family:var(--mono); font-size:11px; color:var(--ink-muted); margin:10px 8px 4px;" id="kpiActual"></p>
+      </div>
+
+      <div class="area-header">Emergentes</div>
+      <div class="kpi-card" style="margin-bottom:9px;">
+        <div class="label">HH registradas</div>
+        <div class="value" id="kpiEmergHH" style="font-size:15px;">—</div>
+      </div>
+      <div class="area-header">Cancelados</div>
+      <div class="kpi-card">
+        <div class="label">HH no ejecutadas</div>
+        <div class="value" id="kpiCancelHH" style="font-size:15px;">—</div>
+      </div>
+    </div>
+
+    <!-- Bottom sheet: entrada de % y estado — vive dentro de <main> para que en
+         escritorio sea el tercer panel del grid (ver regla @media en el <style>) -->
+    <div class="sheet-backdrop" id="sheetBackdrop">
+      <div id="sheetEmptyState" style="text-align:center; padding:60px 20px; color:var(--ink-muted);">
+        <div style="font-size:32px; margin-bottom:10px;">👈</div>
+        <p style="font-size:14px;">Elige una actividad de la lista para ver y cargar su avance aquí.</p>
+      </div>
+      <div class="sheet">
+        <button id="btnVerCurvaMovil" title="Ver Curva S">📊 Curva S</button>
+        <div class="handle"></div>
+        <h2 id="sheetTitle">—</h2>
+        <p class="meta" id="sheetMeta">—</p>
+
+        <div class="supervisores-fila">
+          <div class="ot-status-row">
+            <label>Supervisor Turno A</label>
+            <input type="text" class="supervisor-input-panel" id="sheetSupervisorA" data-turnotipo="A" placeholder="Nombre">
+          </div>
+          <div class="ot-status-row">
+            <label>Supervisor Turno B</label>
+            <input type="text" class="supervisor-input-panel" id="sheetSupervisorB" data-turnotipo="B" placeholder="Nombre">
+          </div>
+        </div>
+
+        <div id="subListPanel" style="display:none;">
+          <p class="rotulo-mini">Subactividades — toca una para cargar su avance</p>
+          <div id="subListRows"></div>
+        </div>
+
+        <div class="turno-select-row">
+          <label>Turno en que se registra este avance</label>
+          <select id="turnoOverride"></select>
+        </div>
+
+        <div class="pct-display" id="pctDisplay">0%</div>
+        <input type="range" id="pctSlider" min="0" max="100" step="5" value="0">
+        <div class="quick-pcts">
+          <button data-v="0">0%</button>
+          <button data-v="25">25%</button>
+          <button data-v="50">50%</button>
+          <button data-v="75">75%</button>
+          <button data-v="100">100%</button>
+        </div>
+
+        <button id="sheetDelete" style="display:none; width:100%; padding:11px; margin-bottom:10px; border-radius:12px; border:1.5px solid var(--cancelada); background:var(--cancelada-soft); color:var(--cancelada); font-family:var(--sans); font-size:13px; font-weight:700; cursor:pointer;">🗑 Eliminar esta actividad emergente</button>
+
+        <div class="componentes-block">
+          <div class="componentes-block-header">
+            <span>Componentes cambiados</span>
+            <button id="btnAddComponente" type="button">+ Agregar</button>
+          </div>
+          <div id="componentesList"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <nav class="tabs">
+    <button class="active" data-view="avance"><span id="navIconList"></span>Avance</button>
+    <button data-view="curva"><span id="navIconChart"></span>Curva S</button>
+  </nav>
+
+  <!-- Modal: agregar componente -->
+  <div class="sheet-backdrop" id="compBackdrop">
+    <div class="sheet">
+      <div class="handle"></div>
+      <h2>Nuevo componente</h2>
+      <p class="meta" id="compOtLabel">—</p>
+
+      <label style="display:block; font-size:12px; color:var(--ink-muted); margin:14px 0 6px;">Código SAP</label>
+      <input type="text" id="compSap" placeholder="Ej: 10-458392" style="width:100%; padding:12px; border-radius:10px; background:var(--navy-soft); color:var(--ink); border:1px solid var(--line); font-family:var(--mono); font-size:14px; margin-bottom:14px;">
+
+      <label style="display:block; font-size:12px; color:var(--ink-muted); margin-bottom:6px;">Descripción</label>
+      <input type="text" id="compDesc" placeholder="Ej: Placa guia VR-FD-02" style="width:100%; padding:12px; border-radius:10px; background:var(--navy-soft); color:var(--ink); border:1px solid var(--line); font-family:var(--sans); font-size:14px; margin-bottom:14px;">
+
+      <label style="display:block; font-size:12px; color:var(--ink-muted); margin-bottom:6px;">Cantidad a retirar</label>
+      <input type="number" id="compCantidad" placeholder="1" min="0" step="1" style="width:100%; padding:12px; border-radius:10px; background:var(--navy-soft); color:var(--ink); border:1px solid var(--line); font-family:var(--mono); font-size:14px; margin-bottom:14px;">
+
+      <label style="display:block; font-size:12px; color:var(--ink-muted); margin-bottom:6px;">Foto (opcional)</label>
+      <input type="file" id="compFoto" accept="image/*" capture="environment" style="width:100%; margin-bottom:8px;">
+      <img id="compFotoPreview" style="display:none; width:100%; max-height:160px; object-fit:cover; border-radius:10px; margin-bottom:14px;">
+
+      <div class="sheet-actions">
+        <button class="btn ghost" id="compCancel">Cancelar</button>
+        <button class="btn primary" id="compSave">Guardar componente</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<!-- Modal: agregar emergente simple -->
+<div class="sheet-backdrop" id="emergBackdrop">
+  <div class="sheet">
+    <div class="handle"></div>
+    <h2>Nueva actividad emergente</h2>
+    <p class="meta">Solo el nombre. Sin subactividades — cargas el % directo cuando quieras.</p>
+
+    <label style="display:block; font-size:12px; color:var(--ink-muted); margin:14px 0 6px;">Nombre de la actividad</label>
+    <input type="text" id="emergNombre" placeholder="Ej: Reparar fuga en línea 6&quot; CV203" style="width:100%; padding:12px; border-radius:10px; background:var(--navy-soft); color:var(--ink); border:1px solid var(--line); font-family:var(--sans); font-size:14px; margin-bottom:14px;">
+
+    <label style="display:block; font-size:12px; color:var(--ink-muted); margin-bottom:6px;">Área</label>
+    <select id="emergArea" style="width:100%; padding:12px; border-radius:10px; background:var(--navy-soft); color:var(--ink); border:1px solid var(--line); font-family:var(--sans); font-size:14px; margin-bottom:14px;"></select>
+
+    <label style="display:block; font-size:12px; color:var(--ink-muted); margin-bottom:6px;">HH estimadas (opcional, para la curva)</label>
+    <input type="number" id="emergHH" placeholder="0" min="0" step="0.5" style="width:100%; padding:12px; border-radius:10px; background:var(--navy-soft); color:var(--ink); border:1px solid var(--line); font-family:var(--mono); font-size:14px; margin-bottom:18px;">
+
+    <div class="sheet-actions">
+      <button class="btn ghost" id="emergCancel">Cancelar</button>
+      <button class="btn primary" id="emergSave">Crear</button>
+    </div>
+  </div>
+</div>
+
+<!-- Marca propia de este cliente (nombre + color en RGB para el PDF) -->
+<script>
+  window.BRANDING = { empresa: "DIMARZA", colorRGB: [255, 122, 30], logoURL: "./assets/bhp-logo.png", logoDimarzaURL: "./assets/dimarza-logo.png" };
+</script>
+
+<!-- Firebase SDK (compat, simple de usar sin bundler) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<script src="./firebase-config.js"></script>
+<script src="./seed-data.js"></script>
+<script src="./engine.js"></script>
+</body>
+</html>
