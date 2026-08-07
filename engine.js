@@ -2763,6 +2763,20 @@ document.addEventListener('DOMContentLoaded', () => {
     if (headerEl) headerEl.style.cursor = 'pointer';
   }, 'header-inicio');
 
+  // Boton "Volver a Linea de tiempo" del layout de escritorio: cierra lo que este
+  // abierto (actividad normal o polines) para que la Linea de tiempo vuelva a mostrarse
+  // ancha, ocupando panel izquierdo + central.
+  safeInit(() => {
+    const btn = document.getElementById('btnVolverLineaTiempoDesktop');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      closeSheet();
+      const pp = document.getElementById('polinesSheetBackdrop');
+      if (pp) pp.classList.remove('open');
+      document.body.classList.remove('polines-abierto');
+    });
+  }, 'volver-linea-tiempo-desktop');
+
 });
 
 // ============================================================
@@ -3233,11 +3247,160 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ---- Informe de actividades (respeta filtro de supervisor) ----
-// ---- Helpers compartidos para dibujar la Linea de tiempo (los usan tanto el informe de
-//      actividades como el informe por turno, para que se vean exactamente igual). ----
+// ---- Helper compartido para dibujar UNA fila de OT en la Linea de tiempo (lo usan tanto
+//      el informe de actividades como el informe por turno, para que se vean igual). ----
 
-// Escribe el % REAL centrado DENTRO de la barra de color (blanco, negrita). Si la barra
-// es muy angosta para que quepa el texto, lo pone justo despues en vez de encimarlo.
+// Nombre de cada subactividad, centrado bajo su propio tramo. Si son varias y alguna es
+// muy angosta, se le presta un poco de ancho de sus vecinos (sin invadirlas del todo). Si
+// hay una sola subactividad en toda la OT, usa el ancho completo de la barra.
+function dibujarNombresPorSegmento(doc, segmentos, trackX, trackW, startY, C_MUTED) {
+  if (!segmentos.length) return startY;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(4.3); doc.setTextColor(...C_MUTED);
+  const n = segmentos.length;
+  let maxLineas = 1;
+  const datos = segmentos.map((seg, i) => {
+    let x0 = seg.x0, x1 = seg.x1;
+    if (n === 1) { x0 = trackX; x1 = trackX + trackW; }
+    else if (x1 - x0 < 12) {
+      const centro = (x0 + x1) / 2;
+      const limIzq = i > 0 ? (segmentos[i - 1].x1 + x0) / 2 : trackX;
+      const limDer = i < n - 1 ? (x1 + segmentos[i + 1].x0) / 2 : trackX + trackW;
+      x0 = Math.max(centro - 6, limIzq); x1 = Math.min(centro + 6, limDer);
+    }
+    const w = Math.max(x1 - x0, 9);
+    let lineas = doc.splitTextToSize(seg.s.nombre, w);
+    if (lineas.length > 2) lineas = [lineas[0], lineas[1].slice(0, Math.max(lineas[1].length - 3, 3)) + '…'];
+    maxLineas = Math.max(maxLineas, lineas.length);
+    return { cx: (x0 + x1) / 2, lineas };
+  });
+  datos.forEach((d) => doc.text(d.lineas, d.cx, startY + 2, { align: 'center' }));
+  doc.setTextColor(0, 0, 0);
+  return startY + maxLineas * 2.2 + 2.4;
+}
+
+// Dibuja la fila completa de una OT: titulo, badge de Gantt, franja de Turno A/B, la barra
+// de un solo color partida por subactividad (con el % de CADA subactividad grande adentro
+// de su tramo y la hora de cada division), las lineas ROJAS de cambio de turno cruzando todo,
+// la linea de AHORA, lo emergente aparte, y los nombres de cada subactividad debajo.
+// Devuelve el nuevo cy. o.etiquetasExtra(ot, cy) es opcional (usado por el informe por turno).
+function dibujarFilaOtLineaTiempo(doc, ot, o) {
+  let cy = o.cy;
+  const { trackX, trackW, px, boundaries, now, marginX, pageW, C_DARK, C_MUTED, C_LINE, C_BANDA, C_BANDB, C_ATIEMPO, C_ATRASADO, C_EMERG, badgeMini } = o;
+  const ini = new Date(ot.inicio), fin = new Date(ot.fin);
+  const subs = (ot.subactividades || []).slice().sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
+  const emergs = (SEED_DATA.complementarias || []).filter((c) => c.otRelacionada === ot.otNum);
+
+  const real = otProgressAt(ot, SEED_DATA.turnoLabels.length - 1);
+  const expected = expectedPctNow(ot, now);
+  const behind = now > ini && real < expected - 0.1 && real < 0.999;
+  const esEmergOt = ot.tipo === 'Emergente';
+  const colorOt = esEmergOt ? C_EMERG : (behind ? C_ATRASADO : C_ATIEMPO);
+
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(6.8); doc.setTextColor(...C_DARK);
+  doc.text(`OT ${ot.otNum} — ${ot.descripcion}`, marginX, cy, { maxWidth: pageW - marginX * 2 });
+  cy += 3;
+
+  if (o.etiquetasExtra) cy = o.etiquetasExtra(ot, cy);
+
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(5.2); doc.setTextColor(...C_MUTED);
+  doc.text(`${fmtDateHour(ot.inicio)} → ${fmtDateHour(ot.fin)}`, marginX, cy);
+  doc.setTextColor(0, 0, 0);
+  badgeMini(pageW - marginX, cy, `De acuerdo a Gantt: ${Math.round(expected * 100)}%`, C_BANDA, [12, 68, 124]);
+  cy += 4;
+
+  // Franja de Turno A / Turno B, solo en el tramo de esta OT
+  const bandaY = cy, bandaH = 3;
+  for (let i = 0; i < boundaries.length - 1; i++) {
+    const s = boundaries[i], e = boundaries[i + 1];
+    if (e < ini || s > fin) continue;
+    const cs = s < ini ? ini : s, ce = e > fin ? fin : e;
+    const x0 = px(cs), x1 = px(ce);
+    const esDia = s.getHours() === 7;
+    doc.setFillColor(...(esDia ? C_BANDA : C_BANDB));
+    doc.rect(x0, bandaY, Math.max(x1 - x0, 0.2), bandaH, 'F');
+    if (x1 - x0 > 7) {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(3.6);
+      doc.setTextColor(...(esDia ? [12, 68, 124] : [130, 130, 124]));
+      doc.text(esDia ? 'Turno A' : 'Turno B', (x0 + x1) / 2, bandaY + 2, { align: 'center' });
+    }
+  }
+  doc.setTextColor(0, 0, 0);
+  cy += bandaH + 2.4;
+
+  // Barra de un solo color para toda la OT — mas alta que antes para que quepan los % adentro
+  const barY = cy, barH = 6;
+  doc.setFillColor(237, 237, 234); doc.roundedRect(trackX, barY, trackW, barH, 0.6, 0.6, 'F');
+  const xIni = px(ini), xFin = px(fin);
+  doc.setFillColor(...colorOt);
+  doc.roundedRect(xIni, barY, Math.max(xFin - xIni, 0.8), barH, 0.6, 0.6, 'F');
+
+  // Segmentos por subactividad: divisor blanco + hora de esa division + % de ESA subactividad
+  const segmentos = subs.map((s) => {
+    const sIni = new Date(s.inicio) < ini ? ini : new Date(s.inicio);
+    const sFin = new Date(s.fin) > fin ? fin : new Date(s.fin);
+    return { s, sIni, sFin, x0: px(sIni), x1: px(sFin) };
+  }).filter((seg) => seg.x1 > seg.x0);
+
+  segmentos.forEach((seg, idx) => {
+    if (idx > 0) {
+      doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.6);
+      doc.line(seg.x0, barY, seg.x0, barY + barH);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(3.4); doc.setTextColor(90, 90, 90);
+      doc.text(fmtDateHour(seg.sIni).split(' ')[0], seg.x0, barY - 0.7, { align: 'center' });
+      doc.setTextColor(0, 0, 0);
+    }
+    const live = getSubLive(ot.otNum, seg.s.nombre);
+    const avanceSub = Math.round((carryForward(live.avance, SEED_DATA.turnoLabels.length - 1) || 0) * 100);
+    const texto = `${avanceSub}%`;
+    const anchoSeg = seg.x1 - seg.x0;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(5.2);
+    let tw = doc.getTextWidth(texto);
+    if (tw + 2 > anchoSeg) { doc.setFontSize(3.4); tw = doc.getTextWidth(texto); }
+    doc.setTextColor(255, 255, 255);
+    doc.text(texto, (seg.x0 + seg.x1) / 2, barY + barH / 2 + 1.2, { align: 'center' });
+    doc.setTextColor(0, 0, 0);
+  });
+  if (!segmentos.length) dibujarPctEnBarra(doc, xIni, xFin, barY, barH, real);
+
+  // Lineas ROJAS de cambio de turno (7am/7pm), cruzando la franja Y la barra, con su hora
+  boundaries.forEach((b) => {
+    if (b <= ini || b >= fin) return;
+    const xb = px(b);
+    doc.setDrawColor(224, 65, 62); doc.setLineWidth(0.5);
+    doc.setLineDashPattern([0.8, 0.6], 0);
+    doc.line(xb, bandaY, xb, barY + barH);
+    doc.setLineDashPattern([], 0);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(3.6); doc.setTextColor(224, 65, 62);
+    doc.text(fmtDateHour(b).split(' ')[0], xb, bandaY - 0.7, { align: 'center' });
+    doc.setTextColor(0, 0, 0);
+  });
+
+  if (now >= ini && now <= fin) {
+    const xNow = px(now);
+    doc.setDrawColor(26, 26, 26); doc.setLineWidth(0.5);
+    doc.line(xNow, barY - 1, xNow, barY + barH + 1);
+  }
+  cy += barH + 1.4;
+
+  if (emergs.length) {
+    const emY = cy, emH = 1.8;
+    emergs.forEach((c) => {
+      const cs = new Date(c.inicio), ce = new Date(c.fin);
+      if (ce < ini || cs > fin) return;
+      const ex0 = px(cs < ini ? ini : cs), ex1 = px(ce > fin ? fin : ce);
+      doc.setFillColor(...C_EMERG); doc.rect(ex0, emY, Math.max(ex1 - ex0, 0.8), emH, 'F');
+    });
+    cy += emH + 1;
+  }
+
+  cy = dibujarNombresPorSegmento(doc, segmentos, trackX, trackW, cy, C_MUTED);
+  cy += 1.3;
+  doc.setDrawColor(...C_LINE); doc.line(marginX, cy - 1.8, pageW - marginX, cy - 1.8);
+  return cy;
+}
+
+// Escribe un % centrado DENTRO de una barra de color (blanco, negrita). Solo se usa como
+// respaldo cuando una OT no tiene subactividades cargadas (caso raro).
 function dibujarPctEnBarra(doc, x0, x1, barY, barH, real) {
   const texto = `${Math.round(real * 100)}%`;
   const anchoBarra = x1 - x0;
@@ -3252,30 +3415,6 @@ function dibujarPctEnBarra(doc, x0, x1, barY, barH, real) {
     doc.text(texto, x1 + 1.2, barY + barH / 2 + 1.1);
   }
   doc.setTextColor(0, 0, 0);
-}
-
-// Escribe el nombre + % de avance de cada subactividad JUSTO DEBAJO de su propio tramo de
-// la barra (no como un solo texto largo corrido) — asi cada descripcion queda alineada con
-// su segmento real y no se monta encima de la del segmento vecino. Devuelve el nuevo cy.
-function dibujarSubactividadesPorSegmento(doc, subs, ini, fin, px, otNum, startY, C_MUTED) {
-  if (!subs.length) return startY;
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(4.3); doc.setTextColor(...C_MUTED);
-  let maxLineas = 1;
-  const datos = subs.map((s) => {
-    const sIni = new Date(s.inicio) < ini ? ini : new Date(s.inicio);
-    const sFin = new Date(s.fin) > fin ? fin : new Date(s.fin);
-    const x0 = px(sIni), x1 = px(sFin);
-    const live = getSubLive(otNum, s.nombre);
-    const avanceSub = Math.round((carryForward(live.avance, SEED_DATA.turnoLabels.length - 1) || 0) * 100);
-    const w = Math.max(x1 - x0, 9);
-    let lineas = doc.splitTextToSize(`${s.nombre} · ${avanceSub}%`, w);
-    if (lineas.length > 2) { lineas = [lineas[0], lineas[1].slice(0, Math.max(lineas[1].length - 3, 3)) + '…']; }
-    maxLineas = Math.max(maxLineas, lineas.length);
-    return { x0, lineas };
-  });
-  datos.forEach((d) => doc.text(d.lineas, d.x0, startY + 2));
-  doc.setTextColor(0, 0, 0);
-  return startY + maxLineas * 2.2 + 2.4;
 }
 
 async function generateInformeActividadesPdf(supervisorFiltro) {
@@ -3378,69 +3517,14 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
     dibujarEjeCompartido();
 
     ots.forEach((ot) => {
-      const ini = new Date(ot.inicio), fin = new Date(ot.fin);
       const subs = (ot.subactividades || []).slice().sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
       const emergs = (SEED_DATA.complementarias || []).filter((c) => c.otRelacionada === ot.otNum);
-      const alturaEstim = 10 + (subs.length ? 6 : 0) + (emergs.length ? 2.5 : 0);
+      const alturaEstim = 14 + (subs.length ? 6 : 0) + (emergs.length ? 2.5 : 0);
       if (cy + alturaEstim > pageH - 14) { newPage(); dibujarEjeCompartido(); }
-
-      const real = otProgressAt(ot, SEED_DATA.turnoLabels.length - 1);
-      const expected = expectedPctNow(ot, now);
-      const behind = now > ini && real < expected - 0.1 && real < 0.999;
-      const esEmergOt = ot.tipo === 'Emergente';
-      const colorOt = esEmergOt ? C_EMERG : (behind ? C_ATRASADO : C_ATIEMPO);
-
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(6.8); doc.setTextColor(...C_DARK);
-      doc.text(`OT ${ot.otNum} — ${ot.descripcion}`, marginX, cy, { maxWidth: pageW - marginX * 2 });
-      cy += 3;
-
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(5.2); doc.setTextColor(...C_MUTED);
-      doc.text(`${fmtDateHour(ot.inicio)} → ${fmtDateHour(ot.fin)}`, marginX, cy);
-      doc.setTextColor(0, 0, 0);
-      badgeMini(pageW - marginX, cy, `De acuerdo a Gantt: ${Math.round(expected * 100)}%`, C_BANDA, [12, 68, 124]);
-      cy += 2.4;
-
-      // Track de fondo: todo el ancho representa la parada completa, tenue,
-      // para que se note en que tramo cae esta OT dentro del total.
-      const barY = cy, barH = 3.2;
-      doc.setFillColor(237, 237, 234); doc.roundedRect(trackX, barY, trackW, barH, 0.6, 0.6, 'F');
-
-      // Barra propia de la OT: SOLO en el tramo que le corresponde, proporcional a su duracion real
-      const x0 = px(ini), x1 = px(fin);
-      doc.setFillColor(...colorOt);
-      doc.roundedRect(x0, barY, Math.max(x1 - x0, 0.8), barH, 0.6, 0.6, 'F');
-      subs.forEach((s, idx) => {
-        if (idx === 0) return;
-        const t = new Date(s.inicio);
-        if (t <= ini || t >= fin) return;
-        const x = px(t);
-        doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.6);
-        doc.line(x, barY, x, barY + barH);
+      cy = dibujarFilaOtLineaTiempo(doc, ot, {
+        cy, trackX, trackW, px, boundaries, now, marginX, pageW,
+        C_DARK, C_MUTED, C_LINE, C_BANDA, C_BANDB, C_ATIEMPO, C_ATRASADO, C_EMERG, badgeMini,
       });
-      dibujarPctEnBarra(doc, x0, x1, barY, barH, real);
-      if (now >= ini && now <= fin) {
-        const xNow = px(now);
-        doc.setDrawColor(26, 26, 26); doc.setLineWidth(0.5);
-        doc.line(xNow, barY - 1, xNow, barY + barH + 1);
-      }
-      cy += barH + 0.8;
-
-      // Actividades emergentes ligadas a esta OT: siempre aparte, en naranja, sin logica de atraso
-      if (emergs.length) {
-        const emY = cy, emH = 1.8;
-        emergs.forEach((c) => {
-          const cs = new Date(c.inicio), ce = new Date(c.fin);
-          if (ce < ini || cs > fin) return;
-          const ex0 = px(cs < ini ? ini : cs), ex1 = px(ce > fin ? fin : ce);
-          doc.setFillColor(...C_EMERG); doc.rect(ex0, emY, Math.max(ex1 - ex0, 0.8), emH, 'F');
-        });
-        cy += emH + 1;
-      }
-
-      // Nombre + % de avance de cada subactividad, cada uno debajo de su propio segmento
-      cy = dibujarSubactividadesPorSegmento(doc, subs, ini, fin, px, ot.otNum, cy, C_MUTED);
-      cy += 1.3;
-      doc.setDrawColor(...C_LINE); doc.line(marginX, cy - 1.8, pageW - marginX, cy - 1.8);
     });
     cy += 4;
   }
@@ -3660,80 +3744,31 @@ async function generateInformeTurnoPdf() {
     dibujarEjeCompartido();
 
     ots.forEach((ot) => {
-      const ini = new Date(ot.inicio), fin = new Date(ot.fin);
       const subs = (ot.subactividades || []).slice().sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
       const emergs = (SEED_DATA.complementarias || []).filter((c) => c.otRelacionada === ot.otNum);
-      const alturaEstim = 13 + (subs.length ? 6 : 0) + (emergs.length ? 2.5 : 0);
+      const alturaEstim = 17 + (subs.length ? 6 : 0) + (emergs.length ? 2.5 : 0);
       if (cy + alturaEstim > pageH - 14) { newPage(); dibujarEjeCompartido(); }
-
-      const real = otProgressAt(ot, SEED_DATA.turnoLabels.length - 1);
-      const expected = expectedPctNow(ot, now);
-      const behind = now > ini && real < expected - 0.1 && real < 0.999;
-      const esEmergOt = ot.tipo === 'Emergente';
-      const colorOt = esEmergOt ? C_EMERG : (behind ? C_ATRASADO : C_ATIEMPO);
       const f = flagsPorOt[ot.otNum];
-
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(6.8); doc.setTextColor(...C_DARK);
-      doc.text(`OT ${ot.otNum} — ${ot.descripcion}`, marginX, cy, { maxWidth: pageW - marginX * 2 });
-      cy += 3;
-
-      // Etiquetas de por que aparece: en curso real y/o segun el Gantt
-      let etx = marginX;
-      if (f && f.enCursoReal) {
-        doc.setFontSize(4.6); doc.setFillColor(234, 243, 222); doc.setTextColor(39, 80, 10);
-        const t = '🔧 En curso (real)'; const w = doc.getTextWidth(t) + 3;
-        doc.roundedRect(etx, cy - 1.9, w, 2.6, 0.8, 0.8, 'F'); doc.text(t, etx + 1.5, cy - 0.1);
-        etx += w + 1.5;
-      }
-      if (f && f.dentroVentana) {
-        doc.setFontSize(4.6); doc.setFillColor(230, 241, 251); doc.setTextColor(12, 68, 124);
-        const t = '📅 Según Gantt'; const w = doc.getTextWidth(t) + 3;
-        doc.roundedRect(etx, cy - 1.9, w, 2.6, 0.8, 0.8, 'F'); doc.text(t, etx + 1.5, cy - 0.1);
-      }
-      doc.setTextColor(0, 0, 0);
-      cy += 3.2;
-
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(5.2); doc.setTextColor(...C_MUTED);
-      doc.text(`${fmtDateHour(ot.inicio)} → ${fmtDateHour(ot.fin)}`, marginX, cy);
-      doc.setTextColor(0, 0, 0);
-      badgeMini(pageW - marginX, cy, `De acuerdo a Gantt: ${Math.round(expected * 100)}%`, C_BANDA, [12, 68, 124]);
-      cy += 2.4;
-
-      const barY = cy, barH = 3.2;
-      doc.setFillColor(237, 237, 234); doc.roundedRect(trackX, barY, trackW, barH, 0.6, 0.6, 'F');
-      const x0 = px(ini), x1 = px(fin);
-      doc.setFillColor(...colorOt);
-      doc.roundedRect(x0, barY, Math.max(x1 - x0, 0.8), barH, 0.6, 0.6, 'F');
-      subs.forEach((s, idx) => {
-        if (idx === 0) return;
-        const t = new Date(s.inicio);
-        if (t <= ini || t >= fin) return;
-        const x = px(t);
-        doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.6);
-        doc.line(x, barY, x, barY + barH);
+      cy = dibujarFilaOtLineaTiempo(doc, ot, {
+        cy, trackX, trackW, px, boundaries, now, marginX, pageW,
+        C_DARK, C_MUTED, C_LINE, C_BANDA, C_BANDB, C_ATIEMPO, C_ATRASADO, C_EMERG, badgeMini,
+        etiquetasExtra: (otx, cyx) => {
+          let etx = marginX;
+          if (f && f.enCursoReal) {
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(4.6); doc.setFillColor(234, 243, 222); doc.setTextColor(39, 80, 10);
+            const t = '🔧 En curso (real)'; const w = doc.getTextWidth(t) + 3;
+            doc.roundedRect(etx, cyx - 1.9, w, 2.6, 0.8, 0.8, 'F'); doc.text(t, etx + 1.5, cyx - 0.1);
+            etx += w + 1.5;
+          }
+          if (f && f.dentroVentana) {
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(4.6); doc.setFillColor(230, 241, 251); doc.setTextColor(12, 68, 124);
+            const t = '📅 Según Gantt'; const w = doc.getTextWidth(t) + 3;
+            doc.roundedRect(etx, cyx - 1.9, w, 2.6, 0.8, 0.8, 'F'); doc.text(t, etx + 1.5, cyx - 0.1);
+          }
+          doc.setTextColor(0, 0, 0);
+          return cyx + 3.2;
+        },
       });
-      dibujarPctEnBarra(doc, x0, x1, barY, barH, real);
-      if (now >= ini && now <= fin) {
-        const xNow = px(now);
-        doc.setDrawColor(26, 26, 26); doc.setLineWidth(0.5);
-        doc.line(xNow, barY - 1, xNow, barY + barH + 1);
-      }
-      cy += barH + 0.8;
-
-      if (emergs.length) {
-        const emY = cy, emH = 1.8;
-        emergs.forEach((c) => {
-          const cs = new Date(c.inicio), ce = new Date(c.fin);
-          if (ce < ini || cs > fin) return;
-          const ex0 = px(cs < ini ? ini : cs), ex1 = px(ce > fin ? fin : ce);
-          doc.setFillColor(...C_EMERG); doc.rect(ex0, emY, Math.max(ex1 - ex0, 0.8), emH, 'F');
-        });
-        cy += emH + 1;
-      }
-
-      cy = dibujarSubactividadesPorSegmento(doc, subs, ini, fin, px, ot.otNum, cy, C_MUTED);
-      cy += 1.3;
-      doc.setDrawColor(...C_LINE); doc.line(marginX, cy - 1.8, pageW - marginX, cy - 1.8);
     });
   }
 

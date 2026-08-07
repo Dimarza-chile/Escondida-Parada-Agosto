@@ -108,6 +108,8 @@
   /* Por defecto (celular) el sheet sigue siendo un modal flotante: el mensaje
      de "elige una actividad" solo tiene sentido en el layout de 3 paneles */
   #sheetEmptyState{ display:none; }
+  /* Este boton solo existe para el layout de 3 paneles de escritorio; en celular no aplica */
+  #btnVolverLineaTiempoDesktop{ display:none; }
 
   /* ---------- Layout de 3 paneles en pantallas grandes (escritorio/tablet) ---------- */
   @media (min-width: 1024px){
@@ -130,19 +132,40 @@
       max-height:calc(100vh - 200px); overflow-y:auto; padding:0;
     }
     body:not(.en-inicio) .view-toggle{ display:none; }
-    body:not(.en-inicio) #listaWrap{
-      grid-column:1; grid-row:1; max-height:calc(100vh - 200px); overflow-y:auto;
-    }
 
-    /* La Linea de tiempo va en el panel CENTRAL — el mismo espacio donde va el detalle
-       de una actividad. Por defecto (nada elegido) se ve la Linea de tiempo completa;
-       en cuanto se elige una OT, esta se esconde y aparece el detalle en su lugar. */
+    /* Por defecto (nada elegido) la Linea de tiempo ocupa el panel izquierdo Y el central
+       juntos (columnas 1-2) — no tiene sentido mostrar la lista de OT al lado de la misma
+       info ya resumida en la linea de tiempo. La lista solo aparece cuando SI se elige
+       una actividad, junto con su detalle, con una animacion para que no se sienta seco. */
     body:not(.en-inicio) #ganttCard{
-      display:block !important; grid-column:2; grid-row:1;
+      display:block !important; grid-column:1/3; grid-row:1;
       max-height:calc(100vh - 200px); overflow-y:auto;
+      animation: panelFadeIn .35s ease;
     }
     body:not(.en-inicio):has(#sheetBackdrop.tiene-seleccion) #ganttCard,
     body:not(.en-inicio):has(#polinesSheetBackdrop.open) #ganttCard{ display:none !important; }
+
+    body:not(.en-inicio) #listaWrap{
+      display:none; grid-column:1; grid-row:1; max-height:calc(100vh - 200px); overflow-y:auto;
+    }
+    body:not(.en-inicio):has(#sheetBackdrop.tiene-seleccion) #listaWrap,
+    body:not(.en-inicio):has(#polinesSheetBackdrop.open) #listaWrap{
+      display:block !important; animation: panelSlideIn .35s ease;
+    }
+    @keyframes panelFadeIn{ from{ opacity:0; } to{ opacity:1; } }
+    @keyframes panelSlideIn{ from{ opacity:0; transform:translateX(-10px); } to{ opacity:1; transform:translateX(0); } }
+
+    /* Boton para volver a la vista amplia de la Linea de tiempo, solo visible cuando hay
+       algo elegido (si no, ya se esta viendo la linea de tiempo, no hace falta el boton) */
+    #btnVolverLineaTiempoDesktop{ display:none; }
+    body:not(.en-inicio):has(#sheetBackdrop.tiene-seleccion) #btnVolverLineaTiempoDesktop,
+    body:not(.en-inicio):has(#polinesSheetBackdrop.open) #btnVolverLineaTiempoDesktop{
+      display:inline-flex; align-items:center; gap:6px; margin:14px 20px 0; padding:8px 14px;
+      background:#fff; border:1px solid var(--line); border-radius:10px; font-size:13px;
+      font-weight:700; color:var(--brand); cursor:pointer; width:fit-content; font-family:var(--sans);
+    }
+    #btnVolverLineaTiempoDesktop:hover{ background:var(--brand-soft); }
+
     body:not(.en-inicio) #sheetBackdrop:not(.tiene-seleccion){ display:none; }
 
     /* El panel de detalle deja de ser un overlay flotante y pasa a ser una columna mas */
@@ -394,6 +417,7 @@
     <div class="turno-actual-badge" id="turnoActualBadge"></div>
   </header>
 
+  <button id="btnVolverLineaTiempoDesktop" type="button">← Volver a Línea de tiempo</button>
   <main>
     <div class="view active" id="view-avance">
       <div class="view-toggle">
