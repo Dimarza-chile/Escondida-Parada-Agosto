@@ -3263,7 +3263,10 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
     ? allOts().filter((o) => otCoincideConParSupervisor(o, supervisorFiltro))
     : allOts();
 
-  // ---- Línea de tiempo: va primero, con particiones de subactividades y turnos A/B ----
+  // ---- Línea de tiempo: va primero, con particiones de subactividades y turnos A/B.
+  //      Todas las OT comparten el MISMO eje de tiempo (el de toda la parada), asi que
+  //      cada barra ocupa solo la porcion de ancho que le corresponde a su duracion real
+  //      — antes cada barra se estiraba a lo ancho de la hoja sin importar cuanto duraba. ----
   const C_ATIEMPO = [31, 169, 113], C_ATRASADO = [224, 65, 62], C_EMERG = [255, 179, 92];
   const C_BANDA = [230, 241, 251], C_BANDB = [243, 243, 240];
   function badgeMini(x, y, txt, bg, fg) {
@@ -3275,8 +3278,15 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
     return w;
   }
   if (ots.length > 0) {
+    const range = paradaRange();
+    const rangeMs = Math.max(range.end - range.start, 1);
+    const trackX = marginX, trackW = pageW - marginX * 2;
+    const px = (d) => trackX + (xPct(d, range) / 100) * trackW;
+    const now = new Date();
+    const boundaries = SEED_DATA.turnos.map((t) => new Date(t));
+
     doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...C_DARK);
-    ensureSpace(14); doc.text('Línea de tiempo', marginX, cy);
+    ensureSpace(22); doc.text('Línea de tiempo', marginX, cy);
     cy += 5.5;
     doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(...C_MUTED);
     doc.text('Turno A: 07:00–19:00 · Turno B: 19:00–07:00. Un solo color por OT según su estado; lo emergente va aparte.', marginX, cy);
@@ -3289,18 +3299,45 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
       lx += doc.getTextWidth(label) + 12;
     });
     doc.setTextColor(0, 0, 0);
-    cy += 6;
+    cy += 5;
 
-    const now = new Date();
-    const boundaries = SEED_DATA.turnos.map((t) => new Date(t));
+    // ---- Eje compartido: UNA sola fila de Turno A / Turno B para toda la parada,
+    //      con los dias marcados encima — se repite al inicio de cada pagina nueva. ----
+    function dibujarEjeCompartido() {
+      ensureSpace(12);
+      const dias = [];
+      let cur = new Date(range.start); cur.setHours(0, 0, 0, 0);
+      const meses = { 0: 'ene', 1: 'feb', 2: 'mar', 3: 'abr', 4: 'may', 5: 'jun', 6: 'jul', 7: 'ago', 8: 'sep', 9: 'oct', 10: 'nov', 11: 'dic' };
+      while (cur <= range.end) { dias.push(new Date(cur)); cur.setDate(cur.getDate() + 1); }
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(5.3); doc.setTextColor(...C_MUTED);
+      dias.forEach((d) => { doc.text(`${d.getDate()}-${meses[d.getMonth()]}`, px(d), cy); });
+      doc.setTextColor(0, 0, 0);
+      cy += 3;
+      const bandaY = cy, bandaH = 3.6;
+      for (let i = 0; i < boundaries.length - 1; i++) {
+        const s = boundaries[i], e = boundaries[i + 1];
+        if (e < range.start || s > range.end) continue;
+        const x0 = px(s < range.start ? range.start : s), x1 = px(e > range.end ? range.end : e);
+        const esDia = s.getHours() === 7;
+        doc.setFillColor(...(esDia ? C_BANDA : C_BANDB));
+        doc.rect(x0, bandaY, Math.max(x1 - x0, 0.2), bandaH, 'F');
+        if (x1 - x0 > 7) {
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(4.6);
+          doc.setTextColor(...(esDia ? [12, 68, 124] : [130, 130, 124]));
+          doc.text(esDia ? 'Turno A' : 'Turno B', (x0 + x1) / 2, bandaY + 2.4, { align: 'center' });
+        }
+      }
+      doc.setTextColor(0, 0, 0);
+      cy += bandaH + 3;
+    }
+    dibujarEjeCompartido();
 
     ots.forEach((ot) => {
       const ini = new Date(ot.inicio), fin = new Date(ot.fin);
-      const spanMs = Math.max(fin - ini, 1);
       const subs = (ot.subactividades || []).slice().sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
       const emergs = (SEED_DATA.complementarias || []).filter((c) => c.otRelacionada === ot.otNum);
-      const alturaEstim = 20 + (subs.length ? 4 : 0) + (emergs.length ? 4 : 0);
-      ensureSpace(alturaEstim);
+      const alturaEstim = 15 + (subs.length ? 4 : 0) + (emergs.length ? 4 : 0);
+      if (cy + alturaEstim > pageH - 14) { newPage(); dibujarEjeCompartido(); }
 
       const real = otProgressAt(ot, SEED_DATA.turnoLabels.length - 1);
       const expected = expectedPctNow(ot, now);
@@ -3321,41 +3358,25 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
       bx -= badgeMini(bx, cy, `De acuerdo a Gantt: ${Math.round(expected * 100)}%`, C_BANDA, [12, 68, 124]);
       cy += 3;
 
-      const trackX = marginX, trackW = pageW - marginX * 2;
-      // Franjas de Turno A / Turno B detras del track
-      const bandaY = cy, bandaH = 3.4;
-      for (let i = 0; i < boundaries.length - 1; i++) {
-        const s = boundaries[i], e = boundaries[i + 1];
-        if (e < ini || s > fin) continue;
-        const cs = s < ini ? ini : s, ce = e > fin ? fin : e;
-        const x0 = trackX + ((cs - ini) / spanMs) * trackW;
-        const x1 = trackX + ((ce - ini) / spanMs) * trackW;
-        const esDia = s.getHours() === 7;
-        doc.setFillColor(...(esDia ? C_BANDA : C_BANDB));
-        doc.rect(x0, bandaY, Math.max(x1 - x0, 0.2), bandaH, 'F');
-        if (x1 - x0 > 7) {
-          doc.setFont('helvetica', 'normal'); doc.setFontSize(4.6);
-          doc.setTextColor(...(esDia ? [12, 68, 124] : [130, 130, 124]));
-          doc.text(esDia ? 'Turno A' : 'Turno B', (x0 + x1) / 2, bandaY + 2.3, { align: 'center' });
-        }
-      }
-      doc.setTextColor(0, 0, 0);
-      cy += bandaH + 1.2;
-
-      // Barra principal: UN solo color para toda la OT, con particiones (lineas blancas) por subactividad
+      // Track de fondo: todo el ancho representa la parada completa, tenue,
+      // para que se note en que tramo cae esta OT dentro del total.
       const barY = cy, barH = 4.4;
+      doc.setFillColor(237, 237, 234); doc.roundedRect(trackX, barY, trackW, barH, 0.7, 0.7, 'F');
+
+      // Barra propia de la OT: SOLO en el tramo que le corresponde, proporcional a su duracion real
+      const x0 = px(ini), x1 = px(fin);
       doc.setFillColor(...colorOt);
-      doc.roundedRect(trackX, barY, trackW, barH, 0.7, 0.7, 'F');
+      doc.roundedRect(x0, barY, Math.max(x1 - x0, 0.8), barH, 0.7, 0.7, 'F');
       subs.forEach((s, idx) => {
         if (idx === 0) return;
         const t = new Date(s.inicio);
         if (t <= ini || t >= fin) return;
-        const x = trackX + ((t - ini) / spanMs) * trackW;
+        const x = px(t);
         doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.6);
         doc.line(x, barY, x, barY + barH);
       });
       if (now >= ini && now <= fin) {
-        const xNow = trackX + ((now - ini) / spanMs) * trackW;
+        const xNow = px(now);
         doc.setDrawColor(26, 26, 26); doc.setLineWidth(0.5);
         doc.line(xNow, barY - 1, xNow, barY + barH + 1);
       }
@@ -3367,17 +3388,20 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
         emergs.forEach((c) => {
           const cs = new Date(c.inicio), ce = new Date(c.fin);
           if (ce < ini || cs > fin) return;
-          const x0 = trackX + ((Math.max(cs, ini) - ini) / spanMs) * trackW;
-          const x1 = trackX + ((Math.min(ce, fin) - ini) / spanMs) * trackW;
-          doc.setFillColor(...C_EMERG); doc.rect(x0, emY, Math.max(x1 - x0, 0.8), emH, 'F');
+          const ex0 = px(cs < ini ? ini : cs), ex1 = px(ce > fin ? fin : ce);
+          doc.setFillColor(...C_EMERG); doc.rect(ex0, emY, Math.max(ex1 - ex0, 0.8), emH, 'F');
         });
         cy += emH + 1.5;
       }
 
-      // Nombre + hora de cada subactividad, debajo de la barra
+      // Nombre + hora + % de avance de cada subactividad, debajo de la barra
       if (subs.length) {
         doc.setFont('helvetica', 'normal'); doc.setFontSize(5.3); doc.setTextColor(...C_MUTED);
-        const txt = subs.map((s) => `${s.nombre} (${fmtDateHour(s.inicio)}–${fmtDateHour(s.fin)})`).join('   ·   ');
+        const txt = subs.map((s) => {
+          const live = getSubLive(ot.otNum, s.nombre);
+          const avanceSub = Math.round((carryForward(live.avance, SEED_DATA.turnoLabels.length - 1) || 0) * 100);
+          return `${s.nombre} (${fmtDateHour(s.inicio)}–${fmtDateHour(s.fin)}) · ${avanceSub}%`;
+        }).join('   ·   ');
         const lineas = doc.splitTextToSize(txt, trackW);
         doc.text(lineas, trackX, cy + 2.2);
         cy += lineas.length * 2.9 + 2;
