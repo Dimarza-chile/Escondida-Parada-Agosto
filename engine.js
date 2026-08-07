@@ -3270,10 +3270,10 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
   const C_ATIEMPO = [31, 169, 113], C_ATRASADO = [224, 65, 62], C_EMERG = [255, 179, 92];
   const C_BANDA = [230, 241, 251], C_BANDB = [243, 243, 240];
   function badgeMini(x, y, txt, bg, fg) {
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(6.3);
-    const w = doc.getTextWidth(txt) + 4;
-    doc.setFillColor(...bg); doc.roundedRect(x - w, y - 2.6, w, 3.6, 1, 1, 'F');
-    doc.setTextColor(...fg); doc.text(txt, x - w / 2, y - 0.3, { align: 'center' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(5.2);
+    const w = doc.getTextWidth(txt) + 3;
+    doc.setFillColor(...bg); doc.roundedRect(x - w, y - 2.1, w, 2.9, 0.8, 0.8, 'F');
+    doc.setTextColor(...fg); doc.text(txt, x - w / 2, y - 0.2, { align: 'center' });
     doc.setTextColor(0, 0, 0);
     return w;
   }
@@ -3285,21 +3285,21 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
     const now = new Date();
     const boundaries = SEED_DATA.turnos.map((t) => new Date(t));
 
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...C_DARK);
-    ensureSpace(22); doc.text('Línea de tiempo', marginX, cy);
-    cy += 5.5;
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(...C_MUTED);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...C_DARK);
+    ensureSpace(18); doc.text('Línea de tiempo', marginX, cy);
+    cy += 4.2;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(5.4); doc.setTextColor(...C_MUTED);
     doc.text('Turno A: 07:00–19:00 · Turno B: 19:00–07:00. Un solo color por OT según su estado; lo emergente va aparte.', marginX, cy);
-    cy += 4.5;
+    cy += 3.6;
     let lx = marginX;
     [['A tiempo', C_ATIEMPO], ['Atrasado', C_ATRASADO], ['Emergente', C_EMERG]].forEach(([label, col]) => {
-      doc.setFillColor(...col); doc.rect(lx, cy - 2.2, 2.6, 2.6, 'F');
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(...C_MUTED);
-      doc.text(label, lx + 4, cy);
-      lx += doc.getTextWidth(label) + 12;
+      doc.setFillColor(...col); doc.rect(lx, cy - 1.7, 2, 2, 'F');
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(5.4); doc.setTextColor(...C_MUTED);
+      doc.text(label, lx + 3, cy);
+      lx += doc.getTextWidth(label) + 9;
     });
     doc.setTextColor(0, 0, 0);
-    cy += 5;
+    cy += 4;
 
     // ---- Eje compartido: UNA sola fila de Turno A / Turno B para toda la parada,
     //      con los dias marcados encima — se repite al inicio de cada pagina nueva. ----
@@ -3309,11 +3309,11 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
       let cur = new Date(range.start); cur.setHours(0, 0, 0, 0);
       const meses = { 0: 'ene', 1: 'feb', 2: 'mar', 3: 'abr', 4: 'may', 5: 'jun', 6: 'jul', 7: 'ago', 8: 'sep', 9: 'oct', 10: 'nov', 11: 'dic' };
       while (cur <= range.end) { dias.push(new Date(cur)); cur.setDate(cur.getDate() + 1); }
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(5.3); doc.setTextColor(...C_MUTED);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(4.4); doc.setTextColor(...C_MUTED);
       dias.forEach((d) => { doc.text(`${d.getDate()}-${meses[d.getMonth()]}`, px(d), cy); });
       doc.setTextColor(0, 0, 0);
-      cy += 3;
-      const bandaY = cy, bandaH = 3.6;
+      cy += 2.4;
+      const bandaY = cy, bandaH = 2.6;
       for (let i = 0; i < boundaries.length - 1; i++) {
         const s = boundaries[i], e = boundaries[i + 1];
         if (e < range.start || s > range.end) continue;
@@ -3321,14 +3321,14 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
         const esDia = s.getHours() === 7;
         doc.setFillColor(...(esDia ? C_BANDA : C_BANDB));
         doc.rect(x0, bandaY, Math.max(x1 - x0, 0.2), bandaH, 'F');
-        if (x1 - x0 > 7) {
-          doc.setFont('helvetica', 'normal'); doc.setFontSize(4.6);
+        if (x1 - x0 > 6) {
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(3.7);
           doc.setTextColor(...(esDia ? [12, 68, 124] : [130, 130, 124]));
-          doc.text(esDia ? 'Turno A' : 'Turno B', (x0 + x1) / 2, bandaY + 2.4, { align: 'center' });
+          doc.text(esDia ? 'Turno A' : 'Turno B', (x0 + x1) / 2, bandaY + 1.8, { align: 'center' });
         }
       }
       doc.setTextColor(0, 0, 0);
-      cy += bandaH + 3;
+      cy += bandaH + 2;
     }
     dibujarEjeCompartido();
 
@@ -3336,7 +3336,7 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
       const ini = new Date(ot.inicio), fin = new Date(ot.fin);
       const subs = (ot.subactividades || []).slice().sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
       const emergs = (SEED_DATA.complementarias || []).filter((c) => c.otRelacionada === ot.otNum);
-      const alturaEstim = 15 + (subs.length ? 4 : 0) + (emergs.length ? 4 : 0);
+      const alturaEstim = 10 + (subs.length ? 3 : 0) + (emergs.length ? 2.5 : 0);
       if (cy + alturaEstim > pageH - 14) { newPage(); dibujarEjeCompartido(); }
 
       const real = otProgressAt(ot, SEED_DATA.turnoLabels.length - 1);
@@ -3345,28 +3345,28 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
       const esEmergOt = ot.tipo === 'Emergente';
       const colorOt = esEmergOt ? C_EMERG : (behind ? C_ATRASADO : C_ATIEMPO);
 
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(8.3); doc.setTextColor(...C_DARK);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(6.8); doc.setTextColor(...C_DARK);
       doc.text(`OT ${ot.otNum} — ${ot.descripcion}`, marginX, cy, { maxWidth: pageW - marginX * 2 });
-      cy += 4;
+      cy += 3;
 
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(...C_MUTED);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(5.2); doc.setTextColor(...C_MUTED);
       doc.text(`${fmtDateHour(ot.inicio)} → ${fmtDateHour(ot.fin)}`, marginX, cy);
       doc.setTextColor(0, 0, 0);
       let bx = pageW - marginX;
       bx -= badgeMini(bx, cy, `Real: ${Math.round(real * 100)}%`, real + 0.001 < expected ? [252, 235, 235] : [234, 243, 222], real + 0.001 < expected ? [121, 31, 31] : [39, 80, 10]);
-      bx -= 2;
+      bx -= 1.5;
       bx -= badgeMini(bx, cy, `De acuerdo a Gantt: ${Math.round(expected * 100)}%`, C_BANDA, [12, 68, 124]);
-      cy += 3;
+      cy += 2.4;
 
       // Track de fondo: todo el ancho representa la parada completa, tenue,
       // para que se note en que tramo cae esta OT dentro del total.
-      const barY = cy, barH = 4.4;
-      doc.setFillColor(237, 237, 234); doc.roundedRect(trackX, barY, trackW, barH, 0.7, 0.7, 'F');
+      const barY = cy, barH = 3.2;
+      doc.setFillColor(237, 237, 234); doc.roundedRect(trackX, barY, trackW, barH, 0.6, 0.6, 'F');
 
       // Barra propia de la OT: SOLO en el tramo que le corresponde, proporcional a su duracion real
       const x0 = px(ini), x1 = px(fin);
       doc.setFillColor(...colorOt);
-      doc.roundedRect(x0, barY, Math.max(x1 - x0, 0.8), barH, 0.7, 0.7, 'F');
+      doc.roundedRect(x0, barY, Math.max(x1 - x0, 0.8), barH, 0.6, 0.6, 'F');
       subs.forEach((s, idx) => {
         if (idx === 0) return;
         const t = new Date(s.inicio);
@@ -3380,34 +3380,34 @@ async function generateInformeActividadesPdf(supervisorFiltro) {
         doc.setDrawColor(26, 26, 26); doc.setLineWidth(0.5);
         doc.line(xNow, barY - 1, xNow, barY + barH + 1);
       }
-      cy += barH + 1;
+      cy += barH + 0.8;
 
       // Actividades emergentes ligadas a esta OT: siempre aparte, en naranja, sin logica de atraso
       if (emergs.length) {
-        const emY = cy, emH = 2.4;
+        const emY = cy, emH = 1.8;
         emergs.forEach((c) => {
           const cs = new Date(c.inicio), ce = new Date(c.fin);
           if (ce < ini || cs > fin) return;
           const ex0 = px(cs < ini ? ini : cs), ex1 = px(ce > fin ? fin : ce);
           doc.setFillColor(...C_EMERG); doc.rect(ex0, emY, Math.max(ex1 - ex0, 0.8), emH, 'F');
         });
-        cy += emH + 1.5;
+        cy += emH + 1;
       }
 
       // Nombre + hora + % de avance de cada subactividad, debajo de la barra
       if (subs.length) {
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(5.3); doc.setTextColor(...C_MUTED);
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(4.4); doc.setTextColor(...C_MUTED);
         const txt = subs.map((s) => {
           const live = getSubLive(ot.otNum, s.nombre);
           const avanceSub = Math.round((carryForward(live.avance, SEED_DATA.turnoLabels.length - 1) || 0) * 100);
           return `${s.nombre} (${fmtDateHour(s.inicio)}–${fmtDateHour(s.fin)}) · ${avanceSub}%`;
         }).join('   ·   ');
         const lineas = doc.splitTextToSize(txt, trackW);
-        doc.text(lineas, trackX, cy + 2.2);
-        cy += lineas.length * 2.9 + 2;
+        doc.text(lineas, trackX, cy + 1.8);
+        cy += lineas.length * 2.3 + 1.4;
         doc.setTextColor(0, 0, 0);
       }
-      cy += 3.5;
+      cy += 2.2;
       doc.setDrawColor(...C_LINE); doc.line(marginX, cy - 1.8, pageW - marginX, cy - 1.8);
     });
     cy += 4;
