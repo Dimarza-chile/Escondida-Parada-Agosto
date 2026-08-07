@@ -2748,28 +2748,19 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }, 'toggle-lista-gantt');
 
+  // Tocar el header/logo lleva a la pantalla de inicio — pero no si el clic fue sobre
+  // alguno de los controles que viven dentro del header (informes, badge de turno),
+  // porque si no, cualquier boton ahi arriba (incluido "Informe por turno") tambien
+  // mandaba a inicio en vez de hacer lo suyo.
   safeInit(() => {
     document.addEventListener('click', (e) => {
       const header = e.target.closest('header.top');
       if (!header) return;
-      if (e.target.closest('.turno-actual-badge')) return;
-      try {
-        if (typeof openInicioView !== 'function') {
-          showToast('DIAG: openInicioView no existe');
-          return;
-        }
-        openInicioView();
-        const v = document.getElementById('view-inicio');
-        if (!v) showToast('DIAG: no se creo view-inicio');
-        else if (!v.classList.contains('active')) showToast('DIAG: view-inicio existe pero no quedo activa');
-      } catch (err) {
-        console.error(err);
-        showToast('DIAG error: ' + err.message);
-      }
+      if (e.target.closest('.turno-actual-badge, .informes-row, .eyebrow')) return;
+      if (typeof openInicioView === 'function') openInicioView();
     });
     const headerEl = document.querySelector('header.top');
     if (headerEl) headerEl.style.cursor = 'pointer';
-    else showToast('DIAG: no se encontro header.top');
   }, 'header-inicio');
 
 });

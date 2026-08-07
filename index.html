@@ -126,25 +126,30 @@
     body:not(.en-inicio) nav.tabs{ display:none; }
     body:not(.en-inicio) #view-avance{ display:contents; }
     body:not(.en-inicio) #view-curva{
-      display:block; grid-column:3; grid-row:2;
+      display:block; grid-column:3; grid-row:1;
       max-height:calc(100vh - 200px); overflow-y:auto; padding:0;
     }
     body:not(.en-inicio) .view-toggle{ display:none; }
-    /* En escritorio faltaba del todo la Linea de tiempo — ahora ocupa una fila propia,
-       arriba de las 3 columnas (lista / detalle / curva), con scroll interno si es larga. */
-    body:not(.en-inicio) #ganttCard{
-      display:block !important; grid-column:1/4; grid-row:1;
-      max-height:320px; overflow-y:auto; margin-bottom:2px;
-    }
     body:not(.en-inicio) #listaWrap{
-      grid-column:1; grid-row:2; max-height:calc(100vh - 200px); overflow-y:auto;
+      grid-column:1; grid-row:1; max-height:calc(100vh - 200px); overflow-y:auto;
     }
+
+    /* La Linea de tiempo va en el panel CENTRAL — el mismo espacio donde va el detalle
+       de una actividad. Por defecto (nada elegido) se ve la Linea de tiempo completa;
+       en cuanto se elige una OT, esta se esconde y aparece el detalle en su lugar. */
+    body:not(.en-inicio) #ganttCard{
+      display:block; grid-column:2; grid-row:1;
+      max-height:calc(100vh - 200px); overflow-y:auto;
+    }
+    body:not(.en-inicio):has(#sheetBackdrop.tiene-seleccion) #ganttCard,
+    body:not(.en-inicio):has(#polinesSheetBackdrop.open) #ganttCard{ display:none; }
+    body:not(.en-inicio) #sheetBackdrop:not(.tiene-seleccion){ display:none; }
 
     /* El panel de detalle deja de ser un overlay flotante y pasa a ser una columna mas */
     body:not(.en-inicio) #sheetBackdrop{
       position:static; inset:auto; background:none; z-index:auto;
       display:block; align-items:initial;
-      grid-column:2; grid-row:2;
+      grid-column:2; grid-row:1;
       max-height:calc(100vh - 200px); overflow-y:auto;
     }
     body:not(.en-inicio) #sheetBackdrop .sheet{
@@ -245,35 +250,35 @@
     input[type=range]::-webkit-slider-thumb{ width:32px; height:32px; margin-top:-12px; }
 
     /* Encabezado "CORREA CV201" etc. en la Linea de tiempo — mas grande y legible */
-    .gantt-area-header{ font-size:12px; letter-spacing:.02em; margin:12px 2px 5px; border-left-width:3px; padding-left:5px; }
-    .wp-tag{ font-size:12px; padding:4px 8px; }
-    .turno-actual-badge{ font-size:10.5px; padding:8px 12px; border-radius:12px; line-height:1.5; }
-    .eyebrow{ font-size:13px; }
+    .gantt-area-header{ font-size:14px; font-weight:700; letter-spacing:.02em; margin:14px 2px 6px; border-left-width:3px; padding-left:6px; }
+    .wp-tag{ font-size:10.5px; padding:3px 7px; }
+    .turno-actual-badge{ font-size:11px; padding:8px 12px; border-radius:12px; line-height:1.5; }
+    .eyebrow{ font-size:11px; }
 
     /* El "chrome" de la tarjeta Linea de tiempo (titulo, leyenda de colores, eje de dias,
        A/B de turno) se habia quedado chico mientras agrandaba solo las filas — ahora todo junto */
-    .gantt-header h3{ font-size:13px; }
-    .gantt-legend{ font-size:9px; gap:6px 10px; }
-    .gantt-legend i{ width:8px; height:8px; }
-    .gantt-axis{ font-size:8px; height:12px; }
-    .turno-band-label{ font-size:7px; top:2px; opacity:.7; }
+    .gantt-header h3{ font-size:15px; font-weight:700; }
+    .gantt-legend{ font-size:11px; gap:7px 12px; }
+    .gantt-legend i{ width:9px; height:9px; }
+    .gantt-axis{ font-size:10px; height:13px; }
+    .turno-band-label{ font-size:9px; top:2px; opacity:.8; }
 
     /* Boton "Informe de actividades por supervisor" + flecha + listado: tamanos de celular reales */
-    .btn-informe-sup{ font-size:11.5px; padding:9px 10px; text-align:left; }
+    .btn-informe-sup{ font-size:12px; padding:9px 10px; text-align:left; }
     .btn-informe-arrow{ font-size:14px; padding:9px 11px; }
     .supervisor-dropdown button{ font-size:14.5px; padding:13px 14px; }
 
     /* Tarjetas de la Linea de tiempo y botones principales, mas grandes */
-    .fila-g, .gantt-row-full{ padding:7px 4px 7px 8px !important; }
-    .gantt-row-full .gantt-row-name{ font-size:12.5px !important; line-height:1.3 !important; font-weight:700 !important; }
-    .gantt-row-full .gantt-row-dates{ font-size:10px !important; line-height:1.45 !important; }
-    .gantt-sup-tag{ font-size:9.5px; }
-    .gantt-sup-dot{ width:6px; height:6px; margin-right:4px; }
-    .gantt-sup-tag.gantt-sup-activo{ padding:2px 7px; }
-    .gantt-badge{ font-size:9px; padding:2px 7px; }
-    .gantt-now-line::after{ font-size:8px; padding:1.5px 5px; bottom:-16px; }
-    .gantt-row-full{ margin-bottom:13px; }
-    .gantt-row-full .gantt-track{ height:11px; }
+    .fila-g, .gantt-row-full{ padding:8px 4px 8px 9px !important; }
+    .gantt-row-full .gantt-row-name{ font-size:13.5px !important; line-height:1.32 !important; font-weight:700 !important; }
+    .gantt-row-full .gantt-row-dates{ font-size:11.5px !important; line-height:1.5 !important; }
+    .gantt-sup-tag{ font-size:11px; }
+    .gantt-sup-dot{ width:7px; height:7px; margin-right:5px; }
+    .gantt-sup-tag.gantt-sup-activo{ padding:2.5px 8px; }
+    .gantt-badge{ font-size:10.5px; padding:3px 9px; }
+    .gantt-now-line::after{ font-size:9px; padding:2px 6px; bottom:-17px; }
+    .gantt-row-full{ margin-bottom:14px; }
+    .gantt-row-full .gantt-track{ height:13px; }
     .btn-add-emerg{ font-size:15px; padding:14px; min-height:50px; }
     .btn-informe{ font-size:12px; padding:9px 10px; min-height:40px; }
     .wp-nom{ font-size:19px; }
