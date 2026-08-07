@@ -1532,7 +1532,11 @@ function listenPolines() {
 }
 
 function polinesPct(otNum) {
-  const items = todosLosPolinesDeOt(otNum);
+  // Los polines EMERGENTES (agregados en terreno) no cuentan aqui — si se sumaran al total
+  // de esta OT, cada vez que se descubre un polin emergente el % de la OT bajaria de golpe
+  // (mismo cambiado, pero mas polines en el total), aunque en realidad no se atraso nada.
+  // Lo emergente se rastrea aparte, como "Alcance Emergentes" en la Curva S.
+  const items = todosLosPolinesDeOt(otNum).filter((p) => !p.emergente);
   if (items.length === 0) return 0;
   const cambiados = items.filter((p) => {
     const e = state.polinesEstado[polinKey(otNum, p.id)];
@@ -1877,8 +1881,6 @@ function polinRowHtml(p, otNum, mostrarEstacion) {
   const e = state.polinesEstado[polinKey(otNum, p.id)];
   const cambiado = e && e.estado === 'Cambiado';
   const comentario = (e && e.comentario) || '';
-  const tieneAntes = e && e.fotoAntesURL;
-  const tieneDespues = e && e.fotoDespuesURL;
   const critClass = p.criticidad ? `crit-border-${p.criticidad}` : '';
   const critLabels = { 1: 'Alta', 2: 'Media', 3: 'Baja' };
   const critSymbols = { 1: '✕', 2: '❙', 3: '✓' };
@@ -1891,9 +1893,10 @@ function polinRowHtml(p, otNum, mostrarEstacion) {
   const selectorPosicion = `<select class="polin-posicion-select" data-possel="${p.id}">${opcionesPos.map((o) =>
     `<option value="${o}" ${o === posicionActual ? 'selected' : ''}>${o || '— Posición —'}</option>`).join('')}</select>`;
   const posTag = posicionActual ? `<span class="polin-posicion-tag">${posicionActual}</span> ` : '';
-  const titulo = mostrarEstacion
-    ? `Estación ${p.estacion || '—'} ${posTag}${p.tipoEstacion ? '· ' + p.tipoEstacion : ''}${p.cantidad ? ' · x' + p.cantidad : ''}`
-    : `${posTag}${p.tipoEstacion ? p.tipoEstacion : 'Cambio'}${p.cantidad ? ' · x' + p.cantidad : ''}`;
+  // El N° de estacion ya se muestra siempre en el mini-encabezado de arriba (sea uno solo o
+  // varios agrupados) — aqui adentro de la tarjeta no se repite, solo el tipo/posicion.
+  const titulo = `${posTag}${p.tipoEstacion ? p.tipoEstacion : 'Cambio'}${p.cantidad ? ' · x' + p.cantidad : ''}`;
+  const descEsc = (p.descripcion || '').replace(/"/g, '&quot;');
   return `
     <div class="polin-row ${cambiado ? 'cambiado' : ''} ${critClass}" data-polinid="${p.id}">
       <div class="polin-check">${cambiado ? '✓' : ''}</div>
@@ -1902,15 +1905,13 @@ function polinRowHtml(p, otNum, mostrarEstacion) {
         <div class="polin-desc">${p.descripcion || ''}</div>
         ${cambiado && e.turno ? `<div class="polin-meta">Cambiado en ${e.turno}${e.supervisor ? ' · ' + e.supervisor : ''}</div>` : ''}
         <label class="polin-posicion-label" onclick="event.stopPropagation()">Posición: ${selectorPosicion}</label>
+        <button type="button" class="btn-agregar-posicion-grupo"
+          data-otnum="${otNum}" data-correa="${p.correa || ''}" data-estacion="${p.estacion || ''}"
+          data-ubicacion="${p.ubicacion || ''}" data-tipo="${p.tipoEstacion || ''}"
+          data-desc="${descEsc}" data-crit="${p.criticidad || ''}" data-emerg="${p.emergente ? '1' : ''}">
+          + Agregar otra posición de esta estación
+        </button>
         <textarea class="polin-comentario" data-comentario="${p.id}" placeholder="Comentario: por qué se cambió o por qué no (opcional)">${comentario}</textarea>
-        <div class="polin-fotos">
-          <button type="button" class="polin-foto-btn ${tieneAntes ? 'tiene-foto' : ''}" data-fotobtn="${p.id}" data-fototipo="antes">📷 ${tieneAntes ? 'Antes ✓' : 'Antes'}</button>
-          ${tieneAntes ? `<button type="button" class="polin-foto-x" data-borrarot="${otNum}" data-borrarpolin="${p.id}" data-borrartipo="antes">✕</button>` : ''}
-          <button type="button" class="polin-foto-btn ${tieneDespues ? 'tiene-foto' : ''}" data-fotobtn="${p.id}" data-fototipo="despues">📷 ${tieneDespues ? 'Después ✓' : 'Después'}</button>
-          ${tieneDespues ? `<button type="button" class="polin-foto-x" data-borrarot="${otNum}" data-borrarpolin="${p.id}" data-borrartipo="despues">✕</button>` : ''}
-          <input type="file" accept="image/*" capture="environment" class="polin-foto-input" data-fotoinput="${p.id}::antes" style="display:none;">
-          <input type="file" accept="image/*" capture="environment" class="polin-foto-input" data-fotoinput="${p.id}::despues" style="display:none;">
-        </div>
       </div>
     </div>`;
 }
@@ -2044,8 +2045,9 @@ function renderPolinesList() {
     });
 
     const rowsHtml = subgrupos.map((sub) => {
-      if (sub.items.length === 1) return polinRowHtml(sub.items[0], otNum, true);
-      return `<div class="polin-subestacion-header">Estación ${sub.estacion || '—'} — ${sub.items.length} cambios</div>${polinGrupoHtml(sub, otNum)}`;
+      const header = `<div class="polin-subestacion-header">Estación ${sub.estacion || '—'}${sub.items.length > 1 ? ' — ' + sub.items.length + ' cambios' : ''}</div>`;
+      if (sub.items.length === 1) return header + polinRowHtml(sub.items[0], otNum, false);
+      return header + polinGrupoHtml(sub, otNum);
     }).join('');
     return `<div class="polines-group-header">${gk}</div>${rowsHtml}`;
   }).join('');
@@ -2101,34 +2103,6 @@ function renderPolinesList() {
       const p = items.find((x) => String(x.id) === sel.dataset.possel);
       if (!p) return;
       await savePolinPosicion(otNum, p, e.target.value);
-    });
-  });
-  wrap.querySelectorAll('.polin-foto-btn').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const input = wrap.querySelector(`[data-fotoinput="${btn.dataset.fotobtn}::${btn.dataset.fototipo}"]`);
-      if (input) input.click();
-    });
-  });
-  wrap.querySelectorAll('.polin-foto-x').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const campo = btn.dataset.borrartipo === 'antes' ? 'fotoAntesURL' : 'fotoDespuesURL';
-      const key = polinKey(btn.dataset.borrarot, btn.dataset.borrarpolin);
-      try {
-        await polinesEstadoCollection().doc(key).set({ [campo]: firebase.firestore.FieldValue.delete() }, { merge: true });
-        showToast('Foto eliminada');
-      } catch (err) { console.error(err); showToast('No se pudo eliminar la foto'); }
-    });
-  });
-  wrap.querySelectorAll('.polin-foto-input').forEach((input) => {
-    input.addEventListener('click', (e) => e.stopPropagation());
-    input.addEventListener('change', async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const [polinId, tipo] = input.dataset.fotoinput.split('::');
-      const p = items.find((x) => String(x.id) === polinId);
-      if (p) await savePolinFoto(otNum, p, tipo, file);
     });
   });
 }
